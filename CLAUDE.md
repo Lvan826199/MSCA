@@ -1,0 +1,324 @@
+# CLAUDE.md
+
+
+
+> **您必须严格遵守本文档。**
+>
+> 始终使用简体中文回复用户,包括你的思考过程，尽量不要使用其他语言回复，
+>
+> 请勿跳过任何步骤
+>
+> 请勿对未明确说明的要求进行假设
+>
+> 任何不确定之处必须在继续之前向用户确认
+
+## 项目概述
+
+本项目为 MSCA（Mobile Screen Control Assistant），一个跨平台的多设备移动端投屏控制系统，支持 Android 与 iOS 设备的屏幕实时投射与反向控制。
+
+核心功能包括：
+
+- 多设备并发投屏与独立控制
+- 单页面同时查看多台设备画面
+- Android 基于 Scrcpy 协议实现高效 H.264 视频流传输与控制
+- iOS 基于 WebDriverAgent + Tidevice/go-ios 实现屏幕投射与 XCTest 控制
+
+## 技术栈
+
+| 层级             | 技术选型                             | 说明                             |
+| :--------------- | :----------------------------------- | :------------------------------- |
+| **前端**         | Vue 3 + Vite + WebCodecs API         | 视频解码渲染，WebSocket 实时通信 |
+| **桌面端**       | Electron                             | 跨平台桌面应用，主进程管理子进程 |
+| **后端**         | Python + FastAPI                     | Web 服务与 WebSocket 服务        |
+| **包管理**       | uv                                   | Python 依赖管理与虚拟环境        |
+| **Android 驱动** | Scrcpy + ADB + adbutils              | 屏幕镜像与控制协议               |
+| **iOS 驱动**     | WebDriverAgent + Tidevice / go-ios   | 屏幕流获取与 XCTest 控制         |
+| **配置存储**     | electron-store / JSON / localStorage | 轻量配置，无数据库               |
+
+## 项目结构
+
+```
+msca/
+├── electron/                 # Electron 主进程与预加载脚本
+│   ├── main.js              # 主进程入口
+│   ├── preload.js           # 预加载脚本
+│   └── scrcpy-manager.js    # Scrcpy 子进程管理模块
+├── frontend/                 # Vue 3 前端应用
+│   ├── src/
+│   │   ├── components/      # Vue 组件（设备列表、投屏窗口等）
+│   │   ├── composables/     # 组合式函数（WebSocket、视频解码）
+│   │   └── App.vue
+│   └── index.html
+├── backend/                  # Python FastAPI 后端
+│   ├── app/
+│   │   ├── api/             # REST API 路由
+│   │   ├── websocket/       # WebSocket 处理
+│   │   ├── drivers/         # 设备驱动抽象层
+│   │   │   ├── android.py   # AndroidDriver
+│   │   │   ├── ios.py       # IOSDriver
+│   │   │   └── adapters/    # iOS 适配器 (tidevice, go-ios)
+│   │   └── core/            # 设备管理、流分发等核心模块
+│   ├── pyproject.toml       # uv 项目配置
+│   └── requirements.txt     # 可选依赖锁定文件
+├── resources/                # 资源文件（图标、WDA.ipa 等）
+└── package.json              # Node.js 项目配置
+```
+
+## 开发环境搭建
+
+### 前置依赖
+
+- **Node.js** 18+
+- **Python** 3.10+
+- **uv** 包管理器
+- **ADB**（Android Platform Tools）
+- **scrcpy** 可执行文件（桌面端方案）
+- **Tidevice**（iOS 低版本17以下支持）：`uv add tidevice`
+- **go-ios**（iOS 高版本17+支持）：从 [releases](https://github.com/danielpaulus/go-ios/releases) 下载二进制
+
+### 初始化步骤
+
+```bash
+# 克隆仓库
+git git clone https://gitee.com/xiaozai-van-liu/MSCA.git
+cd MSCA
+
+# 前端依赖
+npm install
+
+# Python 后端环境（使用 uv）
+cd backend
+uv venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+uv pip install fastapi uvicorn adbutils websockets
+# 如需 iOS 支持：
+uv pip install tidevice
+```
+
+## 常用命令
+
+### 前端开发
+
+```bash
+npm run dev          # 启动 Vite 开发服务器（Web 端）
+npm run electron:dev # 启动 Electron 开发模式
+```
+
+### 后端开发
+
+```bash
+cd backend
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 打包构建
+
+```bash
+npm run build        # 构建 Vue 前端
+npm run electron:build # 打包 Electron 应用（Windows/macOS）
+```
+
+### 依赖管理（uv）
+
+```bash
+# 安装所有依赖
+uv sync
+
+# 安装开发依赖
+uv sync --dev
+
+# 添加依赖
+uv add <package>
+uv add --dev <package>
+```
+
+## UI 设计规范
+
+本项目 UI 设计遵循 **ui-ux-pro-max** Skill 所定义的现代桌面应用设计语言，确保界面专业、一致且易用。
+
+- **设计系统**：参考 ui-ux-pro-max 提供的组件库、间距体系、色彩方案与字体规范。
+- **核心原则**：清晰的信息层级、高效的操作路径、统一的视觉反馈。
+- **适用场景**：设备列表卡片、投屏窗口布局、控制面板按钮、设置界面等所有前端界面。
+
+在进行 UI 设计或前端组件开发时，应优先调用 **ui-ux-pro-max** Skill 获取具体的设计指南与组件规范。
+
+## 核心架构要点
+
+### 设备驱动抽象层
+
+所有设备驱动继承 `AbstractDeviceDriver`，统一接口：
+
+```python
+class AbstractDeviceDriver(ABC):
+    async def start_mirroring(self, options: MirrorOptions) -> str: ...
+    async def stop_mirroring(self) -> None: ...
+    async def send_event(self, event: ControlEvent) -> bool: ...
+    async def get_screenshot(self) -> bytes: ...
+```
+
+- **AndroidDriver**：桌面端通过 Electron 子进程启动 scrcpy；Web 端通过 Python 代理 scrcpy 协议。
+- **IOSDriver**：封装 TideviceAdapter / GoIOSAdapter，管理 WDA 服务与 MJPEG 流。
+
+### 多设备并发
+
+- 桌面端：每个设备独立 scrcpy 子进程。
+- Web 端：每个设备独立 WebSocket 连接与驱动实例。
+- iOS 端口分配：以 8100 为基础，每设备递增 10。
+
+### 通信协议
+
+- **设备管理**：HTTP REST / WebSocket 推送
+- **视频流**：WebSocket 二进制帧（Android H.264，iOS MJPEG JPEG）
+- **控制指令**：WebSocket JSON（点击、滑动、按键等）
+
+## 重要注意事项
+
+- **无需数据库**：所有设备状态为临时数据，配置使用 `electron-store`（桌面端）或 `localStorage`（Web 端）。
+- **iOS WDA 签名**：WebDriverAgent 需使用有效开发者证书签名，否则 7 天过期。
+- **iOS 版本适配**：iOS ≤15.x 使用 Tidevice，≥16.x 使用 go-ios，未知版本自动探测回退。
+- **视频解码**：Web 端优先使用 WebCodecs API 硬件解码 H.264，降级方案为 MSE。
+
+## 参考资源
+
+| 项目           | 用途              | 链接                                            |
+| :------------- | :---------------- | :---------------------------------------------- |
+| scrcpy         | Android 镜像核心  | https://github.com/Genymobile/scrcpy            |
+| Escrcpy        | Electron GUI 参考 | https://github.com/viarotel-org/escrcpy         |
+| ws-scrcpy      | Web 端参考        | https://github.com/NetrisTV/ws-scrcpy           |
+| uiautodev      | Python Web 参考   | https://github.com/codeskyblue/uiautodev        |
+| Tidevice       | iOS 低版本支持    | https://github.com/alibaba/taobao-iphone-device |
+| go-ios         | iOS 高版本支持    | https://github.com/danielpaulus/go-ios          |
+| WebDriverAgent | iOS 自动化核心    | https://github.com/appium/WebDriverAgent        |
+
+## 开发阶段建议
+
+1. **第一阶段**：实现 Android 桌面端投屏（基于 Escrcpy 架构），验证 Electron 子进程管理。
+2. **第二阶段**：实现 Android Web 端投屏（基于 ws-scrcpy/uiautodev 思路），完善 Python 后端与 WebSocket 流。
+3. **第三阶段**：实现 iOS 低版本支持（TideviceAdapter），完成基础投屏控制。
+4. **第四阶段**：实现 iOS 高版本支持（GoIOSAdapter），优化视频流性能（探索 H.264）。
+
+## Code Review 方案
+
+为确保代码质量、一致性与可维护性，本项目建立以下代码审查流程与规范。
+
+**重要**：Code Review 过程中须遵循 **code-review** Skill 所规定的审查标准、流程与最佳实践。该 Skill 定义了详细的审查要点、检查清单与反馈规范，所有代码提交前均需通过基于该 Skill 的审查流程。
+
+### 1. 自动化静态检查
+
+#### 前端（Vue 3 + JavaScript/TypeScript）
+
+| 工具          | 用途                               | 配置文件        |
+| :------------ | :--------------------------------- | :-------------- |
+| **ESLint**    | JavaScript/TypeScript 代码规范检查 | `.eslintrc.cjs` |
+| **Prettier**  | 代码格式化                         | `.prettierrc`   |
+| **Stylelint** | CSS/SCSS 样式规范（可选）          | `.stylelintrc`  |
+
+**建议 ESLint 规则集**：
+- `eslint:recommended`
+- `plugin:vue/vue3-recommended`
+- `@vue/eslint-config-prettier`
+
+**命令集成**：
+```json
+"scripts": {
+  "lint": "eslint . --ext .vue,.js,.ts --fix",
+  "format": "prettier --write ."
+}
+```
+
+#### 后端（Python）
+
+| 工具     | 用途                                            | 配置文件         |
+| :------- | :---------------------------------------------- | :--------------- |
+| **Ruff** | 快速 Linter 与 Formatter（替代 Flake8 + Black） | `pyproject.toml` |
+| **mypy** | 静态类型检查（如使用类型注解）                  | `mypy.ini`       |
+
+**Ruff 配置示例（pyproject.toml）**：
+```toml
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+```
+
+**命令**：
+```bash
+uv run ruff check .        # 代码检查
+uv run ruff format .       # 代码格式化
+uv run mypy backend/       # 类型检查（若启用）
+```
+
+#### Electron 主进程
+
+- 主进程代码亦纳入前端 ESLint 检查范围。
+- 建议增加针对 Node.js 环境的规则（`env: { node: true }`）。
+
+### 2. Code Review 流程
+
+#### 分支策略
+- `main`：稳定生产分支，仅接受通过 PR 合并。
+- `develop`：开发主线，功能分支从此拉取。
+- `feature/xxx`：功能分支，完成后向 `develop` 发起 PR。
+- `fix/xxx`：缺陷修复分支。
+
+#### PR 提交前自检清单
+
+| 检查项               | 说明                                                   |
+| :------------------- | :----------------------------------------------------- |
+| ✅ 本地构建通过       | `npm run build` 与后端无语法错误                       |
+| ✅ 自动化检查通过     | ESLint、Prettier、Ruff 无报错                          |
+| ✅ 新增功能有测试覆盖 | 核心逻辑需补充单元测试（见下节）                       |
+| ✅ 文档同步更新       | 接口变更需更新 API 注释或相关文档                      |
+| ✅ Commit 信息规范    | 遵循 Conventional Commits（如 `feat: add iOS driver`） |
+
+#### Code Review 要点
+
+**通用要点**：
+- 代码可读性与命名规范
+- 错误处理是否完善（如网络中断、设备断开）
+- 资源释放（子进程、端口转发、WebSocket 连接）是否正确
+- 并发安全性（多设备同时操作时的竞态条件）
+
+**前端专项要点**：
+- WebSocket 重连机制与心跳保活
+- 视频解码性能（避免主线程阻塞，合理使用 WebCodecs）
+- 组件拆分与复用性
+- 内存泄漏防范（事件监听器、定时器清理）
+
+**后端专项要点**：
+- FastAPI 路由的异步支持（`async def` 与阻塞 I/O 处理）
+- WebSocket 连接生命周期管理（`try/finally` 清理资源）
+- ADB / usbmuxd 子进程的优雅终止
+- 流数据处理时的背压控制（防止内存暴涨）
+
+**Electron 专项要点**：
+- 主进程与渲染进程 IPC 通信安全性（`contextBridge` 暴露方法）
+- 子进程崩溃后的恢复机制
+- 跨平台兼容性（Windows 与 macOS 路径、进程信号差异）
+
+## Git 操作
+```bash
+# 安装 pre-commit 钩子
+uv run pre-commit install
+
+# 提交代码（会自动触发 pre-commit）
+git add .
+git commit -m "描述"
+
+# 跳过 pre-commit（不推荐）
+git commit --no-verify -m "描述"
+```
+#### Git 提交信息规范（必须）
+
+- 提交信息必须使用 Conventional Commits：`type(scope): subject`
+- 允许的 `type`：`feat`、`fix`、`docs`、`refactor`、`test`、`chore`
+- 禁止使用无法表达变更性质的模糊前缀（如 `update`、`misc`、`todo`）
+- `subject` 要能直接体现本次提交的主要意图（功能新增、缺陷修复、文档调整等）
+- 示例：
+  - `feat(order): 新增订单价格自动匹配回退逻辑`
+  - `fix(api): 修复订单保存时重量整数校验错误`
+  - `docs(skill): 统一项目手册技能分流与开场话术`
