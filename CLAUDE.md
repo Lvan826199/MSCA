@@ -12,6 +12,14 @@
 >
 > 任何不确定之处必须在继续之前向用户确认
 
+## 项目文档索引
+
+| 文档 | 说明 |
+| :--- | :--- |
+| [项目需求及技术栈概览](doc/项目需求及技术栈概览.md) | 完整的技术设计方案，包含架构、协议、各平台详细设计 |
+| [需求拆解](doc/需求拆解.md) | 功能模块拆解，含 13 个模块的子任务与验收标准 |
+| [开发计划](doc/开发计划.md) | 四阶段开发里程碑，含技术验证清单与风险应对 |
+
 ## 项目概述
 
 本项目为 MSCA（Mobile Screen Control Assistant），一个跨平台的多设备移动端投屏控制系统，支持 Android 与 iOS 设备的屏幕实时投射与反向控制。
@@ -69,12 +77,12 @@ msca/
 ### 前置依赖
 
 - **Node.js** 18+
-- **Python** 3.10+
+- **Python** 3.13+
 - **uv** 包管理器
 - **ADB**（Android Platform Tools）
 - **scrcpy** 可执行文件（桌面端方案）
-- **Tidevice**（iOS 低版本17以下支持）：`uv add tidevice`
-- **go-ios**（iOS 高版本17+支持）：从 [releases](https://github.com/danielpaulus/go-ios/releases) 下载二进制
+- **Tidevice**（iOS ≤15.x 支持）：`uv add tidevice`
+- **go-ios**（iOS ≥16.x 支持）：从 [releases](https://github.com/danielpaulus/go-ios/releases) 下载二进制
 
 ### 初始化步骤
 
