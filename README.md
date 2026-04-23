@@ -1,6 +1,6 @@
 # MSCA - 多设备移动端投屏控制系统
 
-MSCA 是一个跨平台的移动设备投屏与控制工具，支持 Windows 和 macOS 系统，同时提供 Web 端访问能力。**当前专注于 Android 设备**，未来规划扩展 iOS 设备支持。
+MSCAMSCA（Mobile Screen Control Assistant）是一个跨平台的移动设备投屏与控制工具，支持 Windows 和 macOS 系统，同时提供 Web 端访问能力。**当前专注于 Android 设备**，未来规划扩展 iOS 设备支持。
 
 ## 核心功能
 
