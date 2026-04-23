@@ -29,7 +29,9 @@ MSCA 是一个跨平台的安卓设备投屏与控制工具，支持 Windows 和
 ```bash
 # 克隆仓库
 git clone https://gitee.com/xiaozai-van-liu/MSCA
-cd MSCA
+# or
+git clone https://github.com/Lvan826199/MSCA
+cd msca
 
 # 安装依赖
 npm install
