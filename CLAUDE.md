@@ -50,7 +50,8 @@ msca/
 ├── electron/                 # Electron 主进程与预加载脚本
 │   ├── main.js              # 主进程入口
 │   ├── preload.js           # 预加载脚本
-│   └── scrcpy-manager.js    # Scrcpy 子进程管理模块
+│   ├── scrcpy-manager.js    # Scrcpy 子进程管理模块
+│   └── backend-manager.js   # Python 后端进程管理模块（BackendManager）
 ├── frontend/                 # Vue 3 前端应用
 │   ├── src/
 │   │   ├── components/      # Vue 组件（设备列表、投屏窗口等）
@@ -122,8 +123,11 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ### 打包构建
 
 ```bash
-npm run build        # 构建 Vue 前端
-npm run electron:build # 打包 Electron 应用（Windows/macOS）
+npm run build            # 构建 Vue 前端
+npm run electron:build   # 打包 Electron 应用（Windows）
+
+# Python 后端 Nuitka 编译（在 backend 目录下）
+nuitka --standalone --onefile --output-filename=msca-backend.exe app/main.py
 ```
 
 ### 依赖管理（uv）
@@ -179,6 +183,55 @@ class AbstractDeviceDriver(ABC):
 - **视频流**：WebSocket 二进制帧（Android H.264，iOS MJPEG JPEG）
 - **控制指令**：WebSocket JSON（点击、滑动、按键等）
 
+## 打包部署架构
+
+### 混合部署模式
+
+MSCA 采用混合部署架构，前后端解耦，同一套 Vue 代码无需修改即可同时用于桌面端和 Web 端：
+
+- **桌面端**：Electron 主进程自动启动内嵌的 Python 后端（Nuitka 编译产物），通过 `127.0.0.1:18000` 本地通信，完全离线可用。
+- **Web 端**：部署公共后端服务（用户自有服务器），浏览器通过 HTTPS/WSS 连接远程后端。Web 端 TLS 由 Nginx 反向代理处理。
+
+### 后端打包
+
+- **工具**：Nuitka（Python → C 编译，生成独立可执行文件 msca-backend.exe）
+- **目标平台**：当前仅 Windows，macOS 支持延后
+- **体积**：不设硬性限制，以功能完整为优先
+- **健康检查**：`GET /health` 端点，返回 200 表示服务就绪
+
+### BackendManager（Electron 主进程模块）
+
+负责本地后端进程的完整生命周期管理：
+- 应用启动时 spawn 后端子进程，轮询 `/health` 确认就绪
+- 崩溃自动重启：最多 3 次，间隔递增（立即 → 3s → 5s），超限弹窗提示用户
+- 应用退出时优雅关闭后端进程
+
+### 前端连接模式
+
+| 模式 | 说明 | 适用场景 |
+| :--- | :--- | :--- |
+| **自动（auto）** | 桌面端默认，优先连接本地后端，失败提示配置远程 | 桌面端日常使用 |
+| **仅本地（local）** | 仅连接 `ws://127.0.0.1:18000` | 离线环境 |
+| **仅远程（remote）** | 连接用户配置的远程后端地址（WSS） | Web 端、远程控制 |
+
+- 桌面端通过 `window.electronAPI` 判断环境，默认 auto 模式。
+- Web 端仅 remote 模式，需配置远程后端地址。
+
+### 端口管理策略
+
+| 端口号 | 用途 | 处理方式 |
+| :--- | :--- | :--- |
+| **18000** | 默认本地后端端口 | 启动前检测可用性，被占用则尝试 18001、18002 |
+| **8100~** | iOS WDA 端口转发 | 每设备递增 10（8100、8110、8120），由后端管理 |
+
+### 构建产物
+
+| 产物 | 说明 |
+| :--- | :--- |
+| **MSCA-Setup.exe** | Electron 应用 + Vue 前端 + msca-backend.exe + scrcpy 二进制 |
+| **msca-web/** | Vue 静态文件，部署至 Nginx 等 Web 服务器 |
+| **msca-backend.exe** | Nuitka 编译的 Python 后端，桌面端内嵌 / Web 端独立部署 |
+
 ## 重要注意事项
 
 - **无需数据库**：所有设备状态为临时数据，配置使用 `electron-store`（桌面端）或 `localStorage`（Web 端）。
@@ -203,7 +256,7 @@ class AbstractDeviceDriver(ABC):
 1. **第一阶段**：实现 Android 桌面端投屏（基于 Escrcpy 架构），验证 Electron 子进程管理。
 2. **第二阶段**：实现 Android Web 端投屏（基于 ws-scrcpy/uiautodev 思路），完善 Python 后端与 WebSocket 流。
 3. **第三阶段**：实现 iOS 低版本支持（TideviceAdapter），完成基础投屏控制。
-4. **第四阶段**：实现 iOS 高版本支持（GoIOSAdapter），优化视频流性能（探索 H.264）。
+4. **第四阶段**：实现 iOS 高版本支持（GoIOSAdapter），完成混合部署架构打包（Nuitka 后端编译 + Electron 打包，当前仅 Windows）。
 
 ## Code Review 方案
 

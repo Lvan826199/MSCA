@@ -1,13 +1,14 @@
 # MSCA - 多设备移动端投屏控制系统
 
-MSCA（Mobile Screen Control Assistant）是一个跨平台的移动设备投屏与控制工具，支持 Windows 和 macOS 系统，同时提供 Web 端访问能力。系统采用 **Python + Vue + Electron** 统一技术栈，通过分层驱动架构实现对 Android 与 iOS 设备的透明管理与并发控制。
+MSCA（Mobile Screen Control Assistant）是一个跨平台的移动设备投屏与控制工具，支持 Windows 系统（macOS 后续支持），同时提供 Web 端访问能力。系统采用 **Python + Vue + Electron** 统一技术栈，通过分层驱动架构实现对 Android 与 iOS 设备的透明管理与并发控制。
 
 ## 核心功能
 
 - **多设备并发管理**：支持同时连接并控制多台移动设备，设备间互不干扰
 - **单设备精细操控**：每台设备拥有独立的控制面板，支持精确的点击、滑动、输入等操作
 - **多设备同屏监控**：支持单页面同时查看多台设备的实时投屏画面，便于批量监控与管理
-- **跨平台支持**：桌面端基于 Electron 构建，原生支持 Windows 和 macOS；同时提供 Web 端，无需安装客户端即可使用浏览器访问
+- **跨平台支持**：桌面端基于 Electron 构建，支持 Windows（macOS 后续支持）；同时提供 Web 端，无需安装客户端即可使用浏览器访问
+- **混合部署**：桌面端内嵌 Python 后端，离线可用；Web 端连接远程后端，支持远程投屏控制
 - **本地化部署**：无需数据库，所有数据仅在本地处理，保障数据安全
 
 ## 设备支持
@@ -83,8 +84,26 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 npm run build            # 构建 Vue 前端
-npm run electron:build   # 打包 Electron 应用
+npm run electron:build   # 打包 Electron 应用（Windows）
 ```
+
+## 部署模式
+
+MSCA 采用混合部署架构，前后端解耦，同一套 Vue 代码同时支持两种使用方式：
+
+### 桌面端（离线可用）
+
+双击 `MSCA-Setup.exe` 安装后，Electron 自动启动内嵌的 Python 后端（Nuitka 编译），通过 `127.0.0.1:18000` 本地通信，无需网络。
+
+- 连接模式：自动（auto）/ 仅本地（local）/ 仅远程（remote），可在设置中切换
+- 后端崩溃自动重启（最多 3 次），超限弹窗提示
+
+### Web 端（远程访问）
+
+部署 Python 后端到服务器，Vue 静态文件部署到 Nginx，浏览器通过 HTTPS/WSS 连接。
+
+- TLS 由 Nginx 反向代理处理，Python 后端仅监听 HTTP/WS
+- 用户需配置远程后端地址
 
 ## 项目结构
 
@@ -93,7 +112,8 @@ msca/
 ├── electron/                 # Electron 主进程与预加载脚本
 │   ├── main.js              # 主进程入口
 │   ├── preload.js           # 预加载脚本
-│   └── scrcpy-manager.js    # Scrcpy 子进程管理模块
+│   ├── scrcpy-manager.js    # Scrcpy 子进程管理模块
+│   └── backend-manager.js   # Python 后端进程管理模块
 ├── frontend/                 # Vue 3 前端应用
 │   ├── src/
 │   │   ├── components/      # Vue 组件（设备列表、投屏窗口等）
