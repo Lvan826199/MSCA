@@ -1,0 +1,36 @@
+[project]
+name = "msca"
+version = "0.1.0"
+description = "Multi-device Mobile Screen Control Assistant"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "adbutils>=2.8.0",
+    "websockets>=13.0",
+    # iOS 支持按需添加：
+    # "tidevice>=0.10.0",
+]
+
+# 可选开发依赖（按需手动安装，不写入锁文件）
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true
