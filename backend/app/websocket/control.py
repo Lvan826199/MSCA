@@ -107,12 +107,21 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
         return protocol.encode_inject_scroll(x, y, sw, sh, h_scroll, v_scroll)
 
     elif cmd_type == "back":
-        return protocol.encode_back_or_screen_on(protocol.ACTION_DOWN)
+        return (
+            protocol.encode_back_or_screen_on(protocol.ACTION_DOWN)
+            + protocol.encode_back_or_screen_on(protocol.ACTION_UP)
+        )
 
     elif cmd_type == "home":
-        return protocol.encode_inject_keycode(protocol.ACTION_DOWN, protocol.KEYCODE_HOME)
+        return (
+            protocol.encode_inject_keycode(protocol.ACTION_DOWN, protocol.KEYCODE_HOME)
+            + protocol.encode_inject_keycode(protocol.ACTION_UP, protocol.KEYCODE_HOME)
+        )
 
     elif cmd_type == "power":
-        return protocol.encode_inject_keycode(protocol.ACTION_DOWN, protocol.KEYCODE_POWER)
+        return (
+            protocol.encode_inject_keycode(protocol.ACTION_DOWN, protocol.KEYCODE_POWER)
+            + protocol.encode_inject_keycode(protocol.ACTION_UP, protocol.KEYCODE_POWER)
+        )
 
     return None
