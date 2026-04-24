@@ -75,7 +75,7 @@ class BackendManager {
 
   _getBackendPath() {
     const isDev = process.env.NODE_ENV !== "production"
-    if (isDev) return process.platform === "win32" ? "python" : "python3"
+    if (isDev) return process.platform === "win32" ? "uv" : "uv"
     const res = process.resourcesPath || path.join(__dirname, "..")
     const exe = process.platform === "win32" ? "msca-backend.exe" : "msca-backend"
     return path.join(res, "resources", exe)
@@ -86,7 +86,7 @@ class BackendManager {
     const cmd = this._getBackendPath()
     let args, opts
     if (isDev) {
-      args = ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", String(this._port)]
+      args = ["run", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", String(this._port)]
       opts = { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, cwd: path.join(__dirname, "..", "backend") }
     } else {
       args = ["--port", String(this._port)]

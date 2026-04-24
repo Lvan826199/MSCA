@@ -58,34 +58,55 @@ git clone https://github.com/Lvan826199/MSCA.git
 
 cd MSCA
 
-# 前端依赖
-npm install
-
-# Python 后端环境（使用 uv）
-uv sync
-
-# 如需 iOS 支持：
-# uv add tidevice        # iOS ≤15.x
-# 下载 go-ios 二进制      # iOS ≥16.x
+# 安装所有依赖（一键完成）
+npm install && cd frontend && npm install && cd ../backend && uv sync && cd ..
 ```
 
-### 开发模式
+### 一键启动（桌面端开发模式）
 
 ```bash
-# 前端开发
-npm run dev              # Vite 开发服务器（Web 端）
-npm run electron:dev     # Electron 开发模式
-
-# 后端开发
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+npm run electron:dev
 ```
+
+该命令会自动完成以下操作，无需手动干预：
+1. 启动 Vite 前端开发服务器（localhost:5173）
+2. 启动 Python 后端服务（localhost:18000）
+3. 等待前端就绪后打开 Electron 桌面窗口
+
+### 仅启动 Web 前端
+
+```bash
+npm run dev
+```
+
+浏览器访问 http://localhost:5173（需要单独启动后端服务）。
 
 ### 构建打包
 
 ```bash
-npm run build            # 构建 Vue 前端
-npm run electron:build   # 打包 Electron 应用（Windows）
+# 仅构建前端
+npm run build
+
+# 编译后端为独立可执行文件（Nuitka）
+npm run backend:build
+
+# 验证后端编译产物是否正常运行
+npm run backend:verify
+
+# 完整打包（前端构建 + 后端编译 + Electron 打包）
+npm run electron:build
 ```
+
+### 命令速查
+
+| 命令 | 说明 |
+| :--- | :--- |
+| `npm run electron:dev` | 一键启动桌面端开发模式（推荐） |
+| `npm run dev` | 仅启动前端开发服务器 |
+| `npm run build` | 构建 Vue 前端 |
+| `npm run backend:build` | Nuitka 编译后端为 exe |
+| `npm run backend:verify` | 验证后端 exe 是否正常运行 |
+| `npm run electron:build` | 完整打包（前端 + 后端 + Electron） |
 
 ## 部署模式
 

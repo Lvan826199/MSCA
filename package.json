@@ -7,15 +7,19 @@
   "scripts": {
     "dev": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
-    "electron:dev": "cross-env NODE_ENV=development electron .",
-    "electron:build": "npm run build && electron-builder",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
+    "electron:build": "npm run build && npm run backend:build && electron-builder",
+    "backend:build": "bash scripts/build-backend.sh",
+    "backend:verify": "bash scripts/verify-backend.sh",
     "lint": "cd frontend && npm run lint",
     "format": "cd frontend && npm run format"
   },
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.1.0",
-    "cross-env": "^7.0.3"
+    "cross-env": "^7.0.3",
+    "concurrently": "^9.1.0",
+    "wait-on": "^8.0.1"
   },
   "build": {
     "appId": "com.msca.app",
@@ -40,6 +44,9 @@
         "from": "resources/",
         "to": "resources/"
       }
-    ]
+    ],
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    }
   }
 }
