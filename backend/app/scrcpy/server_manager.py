@@ -259,9 +259,13 @@ class ScrcpyServerManager:
         if not self._control_socket:
             return
         try:
+            # control socket 是非阻塞的，临时切为阻塞发送
+            self._control_socket.setblocking(True)
+            self._control_socket.settimeout(2)
             await asyncio.get_event_loop().run_in_executor(
                 None, self._control_socket.sendall, data
             )
+            self._control_socket.setblocking(False)
         except Exception as e:
             logger.error(f"[{self.device_serial}] 发送控制指令失败: {e}")
 

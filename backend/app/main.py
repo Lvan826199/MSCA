@@ -10,6 +10,7 @@ from app.core.device_manager import device_manager
 from app.websocket.devices import router as ws_devices_router
 from app.websocket.handler import router as ws_router
 from app.websocket.video import router as ws_video_router
+from app.websocket.control import router as ws_control_router
 
 
 @asynccontextmanager
@@ -36,3 +37,4 @@ app.include_router(mirror_router, prefix="/api")
 app.include_router(ws_router)
 app.include_router(ws_devices_router)
 app.include_router(ws_video_router)
+app.include_router(ws_control_router)

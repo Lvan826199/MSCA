@@ -3,118 +3,165 @@
     <div class="mirror-toolbar">
       <div class="toolbar-left">
         <el-button :icon="ArrowLeft" @click="goBack">返回</el-button>
-        <span class="device-name">{{ deviceId }}</span>
-        <el-tag v-if="mirroring" type="success" size="small" effect="dark">投屏中</el-tag>
-        <el-tag v-else-if="starting" type="warning" size="small" effect="dark">启动中...</el-tag>
-        <el-tag v-else type="info" size="small" effect="dark">未投屏</el-tag>
+        <span class="toolbar-title">投屏监控</span>
+        <el-tag type="info" size="small" effect="dark">{{ devices.length }} 台设备</el-tag>
       </div>
       <div class="toolbar-right">
-        <span v-if="mirroring" class="fps-info">{{ fps }} FPS</span>
-        <span v-if="videoWidth" class="resolution-info">{{ videoWidth }}x{{ videoHeight }}</span>
-        <el-button v-if="mirroring" type="danger" size="small" @click="stopMirror">停止投屏</el-button>
+        <el-button size="small" :icon="Plus" @click="showAddDevice = true">添加设备</el-button>
+        <el-button
+          v-if="devices.length > 0"
+          type="danger"
+          size="small"
+          @click="stopAll"
+        >
+          全部停止
+        </el-button>
       </div>
     </div>
 
-    <div class="mirror-content">
-      <div v-if="errorMsg" class="mirror-error">
-        <el-result icon="error" :sub-title="errorMsg">
-          <template #extra>
-            <el-button type="primary" @click="startMirror">重试</el-button>
-            <el-button @click="goBack">返回</el-button>
-          </template>
-        </el-result>
-      </div>
-
-      <div v-else-if="starting" class="mirror-loading">
-        <el-icon class="is-loading" :size="48"><Loading /></el-icon>
-        <p>正在启动投屏...</p>
-      </div>
-
-      <div v-else class="canvas-wrapper">
-        <canvas ref="canvasEl" class="mirror-canvas" />
-      </div>
+    <div v-if="devices.length === 0" class="mirror-empty">
+      <el-empty description="暂无投屏设备">
+        <el-button type="primary" @click="goBack">返回设备列表</el-button>
+      </el-empty>
     </div>
+
+    <div v-else class="mirror-grid" :class="gridClass">
+      <DeviceMirrorPanel
+        v-for="id in devices"
+        :key="id"
+        :device-id="id"
+        :ref="(el) => setPanelRef(id, el)"
+        @stopped="onDeviceStopped"
+      />
+    </div>
+
+    <!-- 添加设备对话框 -->
+    <el-dialog v-model="showAddDevice" title="添加投屏设备" width="400px" append-to-body>
+      <div v-if="availableDevices.length === 0" style="text-align: center; color: #909399; padding: 20px 0;">
+        没有可用的在线设备
+      </div>
+      <el-checkbox-group v-else v-model="selectedDevices">
+        <el-checkbox
+          v-for="dev in availableDevices"
+          :key="dev.id"
+          :value="dev.id"
+          :label="dev.model || dev.id"
+          style="display: block; margin-bottom: 8px;"
+        />
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="showAddDevice = false">取消</el-button>
+        <el-button type="primary" :disabled="selectedDevices.length === 0" @click="addDevices">
+          添加 ({{ selectedDevices.length }})
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from "vue"
+import { ref, computed, onMounted, onUnmounted } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ArrowLeft, Loading } from "@element-plus/icons-vue"
+import { ArrowLeft, Plus } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
-import { useVideoDecoder } from "@/composables/useVideoDecoder"
+import DeviceMirrorPanel from "@/components/DeviceMirrorPanel.vue"
 
 const route = useRoute()
 const router = useRouter()
-const deviceId = route.query.device || ""
 
-const starting = ref(false)
-const mirroring = ref(false)
-const errorMsg = ref("")
-const canvasEl = ref(null)
+// 当前投屏设备列表
+const devices = ref([])
+const panelRefs = ref({})
+const showAddDevice = ref(false)
+const selectedDevices = ref([])
+const allDevices = ref([])
 
-const { connected, videoWidth, videoHeight, fps, error: decoderError, start: startDecoder, stop: stopDecoder } = useVideoDecoder(deviceId)
+// 根据设备数量计算网格 class
+const gridClass = computed(() => {
+  const count = devices.value.length
+  if (count <= 1) return "grid-1"
+  if (count <= 2) return "grid-2"
+  if (count <= 4) return "grid-4"
+  if (count <= 6) return "grid-6"
+  return "grid-9"
+})
+
+// 可添加的设备（在线且未在投屏中）
+const availableDevices = computed(() =>
+  allDevices.value.filter(
+    (d) => d.status === "online" && !devices.value.includes(d.id)
+  )
+)
+
+function setPanelRef(id, el) {
+  if (el) {
+    panelRefs.value[id] = el
+  } else {
+    delete panelRefs.value[id]
+  }
+}
 
 function getApiBase() {
   const { getBackendUrl } = useConnection()
   return getBackendUrl()
 }
 
-async function startMirror() {
-  if (!deviceId) {
-    errorMsg.value = "未指定设备 ID"
-    return
-  }
-
-  starting.value = true
-  errorMsg.value = ""
-
+async function fetchDevices() {
   try {
-    const res = await fetch(`${getApiBase()}/api/mirror/${deviceId}/start`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ max_fps: 30, bitrate: 8000000, max_size: 0 }),
-    })
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.detail || `HTTP ${res.status}`)
+    const res = await fetch(`${getApiBase()}/api/devices`)
+    if (res.ok) {
+      allDevices.value = await res.json()
     }
-
-    mirroring.value = true
-    starting.value = false
-
-    // 等待 canvas 渲染后启动解码
-    await nextTick()
-    if (canvasEl.value) {
-      startDecoder(canvasEl.value)
-    }
-  } catch (e) {
-    starting.value = false
-    errorMsg.value = `启动投屏失败: ${e.message}`
+  } catch {
+    /* ignore */
   }
 }
 
-async function stopMirror() {
-  stopDecoder()
-  mirroring.value = false
+function addDevices() {
+  for (const id of selectedDevices.value) {
+    if (!devices.value.includes(id)) {
+      devices.value.push(id)
+    }
+  }
+  selectedDevices.value = []
+  showAddDevice.value = false
+}
 
-  try {
-    await fetch(`${getApiBase()}/api/mirror/${deviceId}/stop`, { method: "POST" })
-  } catch { /* ignore */ }
+function onDeviceStopped(deviceId) {
+  devices.value = devices.value.filter((id) => id !== deviceId)
+}
+
+async function stopAll() {
+  for (const panel of Object.values(panelRefs.value)) {
+    if (panel?.stopMirror) {
+      await panel.stopMirror()
+    }
+  }
+  devices.value = []
 }
 
 function goBack() {
-  stopMirror()
+  stopAll()
   router.push("/")
 }
 
 onMounted(() => {
-  startMirror()
+  // 从 URL query 获取初始设备
+  const deviceParam = route.query.device
+  if (deviceParam) {
+    const ids = Array.isArray(deviceParam) ? deviceParam : [deviceParam]
+    devices.value = ids.filter(Boolean)
+  }
+  fetchDevices()
 })
 
 onUnmounted(() => {
-  stopDecoder()
+  // 组件卸载时停止所有投屏
+  for (const panel of Object.values(panelRefs.value)) {
+    if (panel?.stopMirror) {
+      panel.stopMirror()
+    }
+  }
 })
 </script>
 
@@ -129,64 +176,59 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 0 16px;
+  padding: 8px 0 12px;
   border-bottom: 1px solid #333;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
 }
 
-.toolbar-left, .toolbar-right {
+.toolbar-left,
+.toolbar-right {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.device-name {
+.toolbar-title {
   font-size: 15px;
   font-weight: 500;
   color: #e5eaf3;
 }
 
-.fps-info, .resolution-info {
-  font-size: 13px;
-  color: #909399;
-  font-family: monospace;
-}
-
-.mirror-content {
+.mirror-empty {
   flex: 1;
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+.mirror-grid {
+  flex: 1;
+  display: grid;
+  gap: 8px;
   overflow: hidden;
 }
 
-.mirror-loading {
-  text-align: center;
-  color: #909399;
+.grid-1 {
+  grid-template-columns: 1fr;
 }
 
-.mirror-loading p {
-  margin-top: 16px;
-  font-size: 14px;
+.grid-2 {
+  grid-template-columns: repeat(2, 1fr);
 }
 
-.mirror-error {
-  width: 100%;
+.grid-4 {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
 }
 
-.canvas-wrapper {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-  height: 100%;
+.grid-6 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
 }
 
-.mirror-canvas {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  background: #000;
-  border-radius: 4px;
+.grid-9 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
 }
 </style>
