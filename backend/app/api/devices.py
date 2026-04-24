@@ -1,9 +1,16 @@
 from fastapi import APIRouter
 
+from app.core.device_manager import device_manager
+
 router = APIRouter()
 
 
 @router.get("/devices")
 async def list_devices():
-    # TODO: M2 阶段实现 ADB 设备发现
-    return {"devices": []}
+    return {"devices": [d.model_dump() for d in device_manager.devices]}
+
+
+@router.post("/devices/refresh")
+async def refresh_devices():
+    devices = await device_manager.refresh()
+    return {"devices": [d.model_dump() for d in devices]}
