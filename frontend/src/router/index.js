@@ -7,6 +7,11 @@ const routes = [
     component: () => import("@/views/HomeView.vue"),
   },
   {
+    path: "/mirror",
+    name: "Mirror",
+    component: () => import("@/views/MirrorView.vue"),
+  },
+  {
     path: "/settings",
     name: "Settings",
     component: () => import("@/views/SettingsView.vue"),

@@ -30,6 +30,7 @@
         type="primary"
         size="small"
         :disabled="device.status !== 'online'"
+        @click="onMirror"
       >
         投屏
       </el-button>
@@ -39,10 +40,13 @@
 
 <script setup>
 import { computed } from "vue"
+import { useRouter } from "vue-router"
 
 const props = defineProps({
   device: { type: Object, required: true },
 })
+
+const router = useRouter()
 
 const statusClass = computed(() => ({
   online: props.device.status === "online",
@@ -53,6 +57,10 @@ const statusClass = computed(() => ({
 const platformTag = computed(() =>
   props.device.platform === "android" ? "success" : ""
 )
+
+function onMirror() {
+  router.push({ path: "/mirror", query: { device: props.device.id } })
+}
 </script>
 <style scoped>
 .device-card {
