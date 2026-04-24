@@ -21,11 +21,27 @@ logger = logging.getLogger(__name__)
 # scrcpy-server 二进制文件路径（项目根目录 bin/android/scrcpy-server）
 SERVER_JAR_PATH = Path(__file__).resolve().parents[3] / "bin" / "android" / "scrcpy-server"
 
+# 版本文件路径（与 scrcpy-server 同目录，更新 server 时同步更新）
+SERVER_VERSION_PATH = SERVER_JAR_PATH.parent / "scrcpy-server.version"
+
 # 设备端存储路径
 DEVICE_SERVER_PATH = "/data/local/tmp/scrcpy-server.jar"
 
-# scrcpy-server 版本（必须与 bin/android/scrcpy-server 实际版本一致）
-SCRCPY_VERSION = "3.3.4"
+
+def _read_scrcpy_version() -> str:
+    """从版本文件读取 scrcpy-server 版本号。
+
+    版本文件 bin/android/scrcpy-server.version 与 scrcpy-server 二进制同目录，
+    更新 scrcpy-server 时只需同步更新该文件即可，无需改代码。
+    """
+    try:
+        return SERVER_VERSION_PATH.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        logger.warning(f"版本文件不存在: {SERVER_VERSION_PATH}，使用默认版本")
+        return "3.3.4"
+
+
+SCRCPY_VERSION = _read_scrcpy_version()
 
 # 默认投屏参数
 DEFAULT_MAX_SIZE = 0  # 0 表示不限制
