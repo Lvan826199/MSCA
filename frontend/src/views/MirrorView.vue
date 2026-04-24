@@ -7,7 +7,7 @@
         <el-tag type="info" size="small" effect="dark">{{ devices.length }} 台设备</el-tag>
       </div>
       <div class="toolbar-right">
-        <el-button size="small" :icon="Plus" @click="showAddDevice = true">添加设备</el-button>
+        <el-button size="small" :icon="Plus" @click="openAddDevice">添加设备</el-button>
         <el-button
           v-if="devices.length > 0"
           type="danger"
@@ -117,6 +117,12 @@ async function fetchDevices() {
   }
 }
 
+async function openAddDevice() {
+  await fetchDevices()
+  selectedDevices.value = []
+  showAddDevice.value = true
+}
+
 function addDevices() {
   for (const id of selectedDevices.value) {
     if (!devices.value.includes(id)) {
@@ -132,16 +138,16 @@ function onDeviceStopped(deviceId) {
 }
 
 async function stopAll() {
-  for (const panel of Object.values(panelRefs.value)) {
-    if (panel?.stopMirror) {
-      await panel.stopMirror()
-    }
-  }
+  // 先收集所有 panel 引用，避免遍历过程中 panelRefs 被修改
+  const panels = Object.values(panelRefs.value).filter((p) => p?.stopMirror)
+  const stopPromises = panels.map((p) => p.stopMirror().catch(() => {}))
+  await Promise.all(stopPromises)
   devices.value = []
+  panelRefs.value = {}
 }
 
-function goBack() {
-  stopAll()
+async function goBack() {
+  await stopAll()
   router.push("/")
 }
 

@@ -7,22 +7,12 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.api.mirror import get_active_driver
 from app.scrcpy import protocol
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# 活跃的投屏会话引用（由 mirror.py 管理，这里只读取）
-# 通过 app.state 共享
-_app_state = None
-
-
-def _get_sessions():
-    """获取活跃投屏会话字典。"""
-    if _app_state and hasattr(_app_state, "mirror_sessions"):
-        return _app_state.mirror_sessions
-    return {}
 
 
 @router.websocket("/ws/control/{device_id}")
@@ -38,9 +28,6 @@ async def control_websocket(websocket: WebSocket, device_id: str):
     - home: { type: "home" }
     - power: { type: "power" }
     """
-    global _app_state
-    _app_state = websocket.app.state
-
     await websocket.accept()
     logger.info(f"[{device_id}] 控制 WS 已连接")
 
@@ -49,13 +36,13 @@ async def control_websocket(websocket: WebSocket, device_id: str):
             data = await websocket.receive_json()
             cmd_type = data.get("type", "")
 
-            sessions = _get_sessions()
-            session = sessions.get(device_id)
-            if not session:
+            try:
+                driver = get_active_driver(device_id)
+            except Exception:
                 await websocket.send_json({"error": "设备未在投屏中"})
                 continue
 
-            manager = session.get("manager")
+            manager = driver._server_manager
             if not manager or not manager.running:
                 await websocket.send_json({"error": "投屏会话未就绪"})
                 continue
@@ -90,7 +77,10 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
         action_map = {"down": protocol.ACTION_DOWN, "up": protocol.ACTION_UP}
         action = action_map.get(data.get("action", ""), protocol.ACTION_DOWN)
         keycode = int(data.get("keycode", 0))
-        return protocol.encode_inject_keycode(action, keycode)
+        return (
+            protocol.encode_inject_keycode(protocol.ACTION_DOWN, keycode)
+            + protocol.encode_inject_keycode(protocol.ACTION_UP, keycode)
+        )
 
     elif cmd_type == "text":
         text = data.get("text", "")
