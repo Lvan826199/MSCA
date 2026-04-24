@@ -86,7 +86,8 @@ class BackendManager {
     const cmd = this._getBackendPath()
     let args, opts
     if (isDev) {
-      args = ["run", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", String(this._port)]
+      // dev 模式走 __main__.py，统一处理端口文件写入
+      args = ["run", "python", "__main__.py", "--host", "127.0.0.1", "--port", String(this._port)]
       opts = { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, cwd: path.join(__dirname, "..", "backend") }
     } else {
       args = ["--port", String(this._port)]

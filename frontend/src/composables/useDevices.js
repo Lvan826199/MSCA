@@ -5,16 +5,12 @@ const devices = ref([])
 let ws = null
 let reconnectTimer = null
 
-function getDevicesWsUrl() {
-  const { getBackendUrl } = useConnection()
-  return getBackendUrl().replace(/^http/, "ws") + "/ws/devices"
-}
-
 function connect() {
   if (ws && ws.readyState === WebSocket.OPEN) return
 
+  const { toWsUrl } = useConnection()
   try {
-    ws = new WebSocket(getDevicesWsUrl())
+    ws = new WebSocket(toWsUrl("/ws/devices"))
   } catch {
     scheduleReconnect()
     return

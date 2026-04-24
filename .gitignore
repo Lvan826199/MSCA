@@ -51,3 +51,6 @@ logs/
 .env
 .env.local
 .env.*.local
+
+# Backend port file (auto-generated)
+.backend-port

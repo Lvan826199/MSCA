@@ -23,17 +23,13 @@ export function useVideoDecoder(deviceId) {
   let fpsTimer = null
   let configData = null // 缓存 SPS/PPS 用于 decoder configure
 
-  function getVideoWsUrl() {
-    const { getBackendUrl } = useConnection()
-    return getBackendUrl().replace(/^http/, "ws") + `/ws/video/${deviceId}`
-  }
-
   function start(canvas) {
     if (ws) return
     canvasRef.value = canvas
     error.value = null
 
-    ws = new WebSocket(getVideoWsUrl())
+    const { toWsUrl } = useConnection()
+    ws = new WebSocket(toWsUrl(`/ws/video/${deviceId}`))
     ws.binaryType = "arraybuffer"
 
     ws.onopen = () => {

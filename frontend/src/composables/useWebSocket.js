@@ -10,18 +10,13 @@ const MAX_RECONNECT_ATTEMPTS = 10
 const HEARTBEAT_INTERVAL = 30000
 const RECONNECT_BASE_DELAY = 1000
 
-function getWsUrl() {
-  const { getBackendUrl } = useConnection()
-  const url = getBackendUrl()
-  return url.replace(/^http/, "ws") + "/ws/echo"
-}
-
 function connect() {
   if (ws && ws.readyState === WebSocket.OPEN) return
 
+  const { toWsUrl } = useConnection()
   status.value = "connecting"
   try {
-    ws = new WebSocket(getWsUrl())
+    ws = new WebSocket(toWsUrl("/ws/echo"))
   } catch {
     status.value = "disconnected"
     scheduleReconnect()
@@ -82,6 +77,12 @@ function scheduleReconnect() {
 }
 
 export function useWebSocket() {
+  // 首次调用时等待后端 URL 就绪后自动连接
+  if (!ws && status.value === "disconnected" && reconnectAttempts === 0) {
+    const { ready } = useConnection()
+    ready.then(() => connect())
+  }
+
   return {
     status: readonly(status),
     connect,

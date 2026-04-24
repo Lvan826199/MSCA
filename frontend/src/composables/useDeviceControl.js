@@ -19,18 +19,11 @@ export function useDeviceControl(deviceId) {
   let videoWidth = 0
   let videoHeight = 0
 
-  function getWsUrl() {
-    const { getBackendUrl } = useConnection()
-    const base = getBackendUrl()
-    const wsBase = base.replace(/^http/, "ws")
-    return `${wsBase}/ws/control/${deviceId}`
-  }
-
   function connect() {
     if (ws) return
 
-    const url = getWsUrl()
-    ws = new WebSocket(url)
+    const { toWsUrl } = useConnection()
+    ws = new WebSocket(toWsUrl(`/ws/control/${deviceId}`))
 
     ws.onopen = () => {
       connected.value = true

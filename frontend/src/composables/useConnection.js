@@ -1,10 +1,40 @@
-import { ref } from "vue"
+/**
+ * useConnection — 后端连接管理。
+ *
+ * 三种场景：
+ * - Electron 模式：通过 IPC 获取 BackendManager 分配的端口
+ * - Vite dev 模式：backendUrl 为空串，所有请求走 Vite proxy
+ * - 生产 Web 模式：使用 window.location.origin
+ */
+
+import { ref, readonly } from "vue"
 
 const isElectron = typeof window !== "undefined" && !!window.electronAPI
 
-const mode = ref(isElectron ? "auto" : "remote") // auto | local | remote
+const mode = ref(isElectron ? "auto" : "local") // auto | local | remote
 const remoteUrl = ref("")
-const localUrl = "http://127.0.0.1:18000"
+const backendUrl = ref("")
+
+// 模块级初始化 promise，只执行一次
+const ready = initBackendUrl()
+
+async function initBackendUrl() {
+  if (isElectron) {
+    // Electron 模式：通过 IPC 获取后端实际端口
+    try {
+      const port = await window.electronAPI.getBackendPort()
+      backendUrl.value = `http://127.0.0.1:${port}`
+    } catch {
+      backendUrl.value = "http://127.0.0.1:18000"
+    }
+  } else if (import.meta.env.DEV) {
+    // Vite dev 模式：空串 → 相对 URL → Vite proxy 转发
+    backendUrl.value = ""
+  } else {
+    // 生产 Web 模式：后端与前端同源部署
+    backendUrl.value = window.location.origin
+  }
+}
 
 function setMode(newMode) {
   mode.value = newMode
@@ -14,20 +44,42 @@ function setRemoteUrl(url) {
   remoteUrl.value = url
 }
 
+/**
+ * 获取后端 HTTP 基础 URL。
+ * remote 模式返回用户配置的远程地址，其他模式返回动态解析的 backendUrl。
+ */
 function getBackendUrl() {
-  if (mode.value === "local") return localUrl
-  if (mode.value === "remote") return remoteUrl.value || localUrl
-  // auto: 桌面端优先本地
-  return localUrl
+  if (mode.value === "remote" && remoteUrl.value) {
+    return remoteUrl.value
+  }
+  return backendUrl.value
+}
+
+/**
+ * 将路径转换为 WebSocket URL。
+ * 统一处理 Vite proxy（空 backendUrl）和直连（有 backendUrl）两种情况。
+ */
+function toWsUrl(path) {
+  const base = getBackendUrl()
+  if (!base) {
+    // Vite dev 模式：用当前页面 host，走 proxy
+    const proto = location.protocol === "https:" ? "wss:" : "ws:"
+    return `${proto}//${location.host}${path}`
+  }
+  return base.replace(/^http/, "ws") + path
 }
 
 export function useConnection() {
   return {
     isElectron,
+    isDev: import.meta.env.DEV,
     mode,
     remoteUrl,
+    backendUrl: readonly(backendUrl),
+    ready,
     setMode,
     setRemoteUrl,
     getBackendUrl,
+    toWsUrl,
   }
 }
