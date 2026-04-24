@@ -24,8 +24,8 @@ SERVER_JAR_PATH = Path(__file__).resolve().parents[3] / "bin" / "android" / "scr
 # 设备端存储路径
 DEVICE_SERVER_PATH = "/data/local/tmp/scrcpy-server.jar"
 
-# scrcpy-server 版本
-SCRCPY_VERSION = "3.1"
+# scrcpy-server 版本（必须与 bin/android/scrcpy-server 实际版本一致）
+SCRCPY_VERSION = "3.3.4"
 
 # 默认投屏参数
 DEFAULT_MAX_SIZE = 0  # 0 表示不限制
@@ -172,8 +172,14 @@ class ScrcpyServerManager:
         )
 
     def _connect_sockets(self, local_port: int) -> None:
-        """连接 video 和 control socket，读取设备元信息。"""
-        # 连接 video socket
+        """连接 video 和 control socket，读取设备元信息。
+
+        scrcpy 3.3+ 协议要求：
+        1. 连接 video socket → 读取 dummy byte
+        2. 连接 control socket
+        3. server 此时才开始发送 device meta + 视频流
+        """
+        # 1. 连接 video socket
         self._video_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._video_socket.settimeout(SOCKET_CONNECT_TIMEOUT)
         self._video_socket.connect(("127.0.0.1", local_port))
@@ -183,12 +189,12 @@ class ScrcpyServerManager:
         if not dummy:
             raise ConnectionError("未收到 dummy byte，scrcpy-server 可能未就绪")
 
-        # 连接 control socket
+        # 2. 连接 control socket（必须在读 meta 之前连接）
         self._control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._control_socket.settimeout(SOCKET_CONNECT_TIMEOUT)
         self._control_socket.connect(("127.0.0.1", local_port))
 
-        # 从 video socket 读取设备元信息
+        # 3. 两个 socket 都连上后，server 开始发送 device meta
         # 设备名称：64 字节 UTF-8 字符串
         meta = self._recv_exact(self._video_socket, 64)
         self._device_name = meta.decode("utf-8").rstrip("\x00")
