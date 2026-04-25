@@ -77,9 +77,11 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
         action_map = {"down": protocol.ACTION_DOWN, "up": protocol.ACTION_UP}
         action = action_map.get(data.get("action", ""), protocol.ACTION_DOWN)
         keycode = int(data.get("keycode", 0))
+        metastate = int(data.get("metastate", 0))
+        repeat = int(data.get("repeat", 0))
         return (
-            protocol.encode_inject_keycode(protocol.ACTION_DOWN, keycode)
-            + protocol.encode_inject_keycode(protocol.ACTION_UP, keycode)
+            protocol.encode_inject_keycode(protocol.ACTION_DOWN, keycode, repeat, metastate)
+            + protocol.encode_inject_keycode(protocol.ACTION_UP, keycode, 0, metastate)
         )
 
     elif cmd_type == "text":
@@ -113,5 +115,23 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
             protocol.encode_inject_keycode(protocol.ACTION_DOWN, protocol.KEYCODE_POWER)
             + protocol.encode_inject_keycode(protocol.ACTION_UP, protocol.KEYCODE_POWER)
         )
+
+    elif cmd_type == "expand_notification":
+        return protocol.encode_expand_notification_panel()
+
+    elif cmd_type == "expand_settings":
+        return protocol.encode_expand_settings_panel()
+
+    elif cmd_type == "collapse_panels":
+        return protocol.encode_collapse_panels()
+
+    elif cmd_type == "clipboard":
+        text = data.get("text", "")
+        paste = data.get("paste", False)
+        if text:
+            return protocol.encode_set_clipboard(text, paste)
+
+    elif cmd_type == "rotate":
+        return protocol.encode_rotate_device()
 
     return None

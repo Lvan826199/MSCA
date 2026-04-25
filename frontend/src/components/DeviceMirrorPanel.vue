@@ -38,6 +38,12 @@
       @volume-up="control.sendVolumeUp()"
       @volume-down="control.sendVolumeDown()"
       @power="control.sendPower()"
+      @expand-notification="control.sendExpandNotification()"
+      @expand-settings="control.sendExpandSettings()"
+      @collapse-panels="control.sendCollapsePanels()"
+      @rotate="control.sendRotate()"
+      @send-text="control.sendText($event)"
+      @clipboard="(text) => control.sendClipboard(text, true)"
     />
   </div>
 </template>
@@ -120,6 +126,7 @@ async function stopMirror() {
   control.disconnect()
   stopDecoder()
   mirroring.value = false
+  controlBound = false
   emit("stopped", props.deviceId)
 
   try {
@@ -138,10 +145,17 @@ function sendRecents() {
   control.send({ type: "key", action: "down", keycode: 187 })
 }
 
-// 视频尺寸就绪后绑定触控事件
+// 视频尺寸就绪/变化后绑定或更新触控事件
+let controlBound = false
 watch([videoWidth, videoHeight], ([w, h]) => {
   if (w && h && canvasEl.value) {
-    control.bindCanvas(canvasEl.value, w, h)
+    if (!controlBound) {
+      control.bindCanvas(canvasEl.value, w, h)
+      controlBound = true
+    } else {
+      // 屏幕旋转导致尺寸变化，仅更新坐标映射
+      control.updateVideoSize(w, h)
+    }
   }
 })
 

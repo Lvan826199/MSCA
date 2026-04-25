@@ -110,7 +110,8 @@ async function fetchDevices() {
   try {
     const res = await fetch(`${getApiBase()}/api/devices`)
     if (res.ok) {
-      allDevices.value = await res.json()
+      const data = await res.json()
+      allDevices.value = data.devices || data || []
     }
   } catch {
     /* ignore */
@@ -138,10 +139,11 @@ function onDeviceStopped(deviceId) {
 }
 
 async function stopAll() {
-  // 先收集所有 panel 引用，避免遍历过程中 panelRefs 被修改
   const panels = Object.values(panelRefs.value).filter((p) => p?.stopMirror)
-  const stopPromises = panels.map((p) => p.stopMirror().catch(() => {}))
-  await Promise.all(stopPromises)
+  // 每个 stop 加 3 秒超时，避免卡住
+  const withTimeout = (fn) =>
+    Promise.race([fn(), new Promise((resolve) => setTimeout(resolve, 3000))])
+  await Promise.all(panels.map((p) => withTimeout(() => p.stopMirror()).catch(() => {})))
   devices.value = []
   panelRefs.value = {}
 }

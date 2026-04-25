@@ -30,7 +30,13 @@ CONTROL_TYPE_INJECT_TEXT = 1
 CONTROL_TYPE_INJECT_TOUCH = 2
 CONTROL_TYPE_INJECT_SCROLL = 3
 CONTROL_TYPE_BACK_OR_SCREEN_ON = 4
+CONTROL_TYPE_EXPAND_NOTIFICATION_PANEL = 5
+CONTROL_TYPE_EXPAND_SETTINGS_PANEL = 6
+CONTROL_TYPE_COLLAPSE_PANELS = 7
+CONTROL_TYPE_GET_CLIPBOARD = 8
+CONTROL_TYPE_SET_CLIPBOARD = 9
 CONTROL_TYPE_SET_SCREEN_POWER_MODE = 10
+CONTROL_TYPE_ROTATE_DEVICE = 11
 
 # 触控动作
 ACTION_DOWN = 0
@@ -40,9 +46,26 @@ ACTION_MOVE = 2
 # Android KeyEvent
 KEYCODE_HOME = 3
 KEYCODE_BACK = 4
-KEYCODE_POWER = 26
 KEYCODE_VOLUME_UP = 24
 KEYCODE_VOLUME_DOWN = 25
+KEYCODE_POWER = 26
+KEYCODE_TAB = 61
+KEYCODE_SPACE = 62
+KEYCODE_ENTER = 66
+KEYCODE_DEL = 67  # Backspace
+KEYCODE_ESCAPE = 111
+KEYCODE_FORWARD_DEL = 112  # Delete
+KEYCODE_APP_SWITCH = 187
+
+# Android MetaState
+META_SHIFT_ON = 0x01
+META_ALT_ON = 0x02
+META_CTRL_ON = 0x1000
+
+# 剪贴板 copy_key
+COPY_KEY_NONE = 0
+COPY_KEY_COPY = 1
+COPY_KEY_CUT = 2
 
 
 def parse_nal_units(data: bytes) -> list[tuple[int, bytes]]:
@@ -197,3 +220,73 @@ def encode_back_or_screen_on(action: int) -> bytes:
 def encode_set_screen_power_mode(mode: int) -> bytes:
     """编码屏幕电源模式指令。mode: 0=OFF, 2=NORMAL。"""
     return struct.pack(">BB", CONTROL_TYPE_SET_SCREEN_POWER_MODE, mode)
+
+
+def encode_expand_notification_panel() -> bytes:
+    """编码展开通知栏指令。"""
+    return struct.pack(">B", CONTROL_TYPE_EXPAND_NOTIFICATION_PANEL)
+
+
+def encode_expand_settings_panel() -> bytes:
+    """编码展开设置面板指令。"""
+    return struct.pack(">B", CONTROL_TYPE_EXPAND_SETTINGS_PANEL)
+
+
+def encode_collapse_panels() -> bytes:
+    """编码折叠面板指令。"""
+    return struct.pack(">B", CONTROL_TYPE_COLLAPSE_PANELS)
+
+
+def encode_set_clipboard(text: str, paste: bool = False) -> bytes:
+    """编码设置剪贴板指令。
+
+    scrcpy v3 格式：type(1) + sequence(8) + paste(1) + length(4) + text
+    """
+    text_bytes = text.encode("utf-8")
+    return struct.pack(
+        ">BqBI",
+        CONTROL_TYPE_SET_CLIPBOARD,
+        0,  # sequence
+        1 if paste else 0,
+        len(text_bytes),
+    ) + text_bytes
+
+
+def encode_rotate_device() -> bytes:
+    """编码旋转设备指令。"""
+    return struct.pack(">B", CONTROL_TYPE_ROTATE_DEVICE)
+
+
+def encode_expand_notification_panel() -> bytes:
+    """展开通知栏。"""
+    return struct.pack(">B", CONTROL_TYPE_EXPAND_NOTIFICATION_PANEL)
+
+
+def encode_expand_settings_panel() -> bytes:
+    """展开设置面板（快捷开关）。"""
+    return struct.pack(">B", CONTROL_TYPE_EXPAND_SETTINGS_PANEL)
+
+
+def encode_collapse_panels() -> bytes:
+    """收起通知栏/设置面板。"""
+    return struct.pack(">B", CONTROL_TYPE_COLLAPSE_PANELS)
+
+
+def encode_set_clipboard(text: str, paste: bool = False) -> bytes:
+    """设置设备剪贴板内容。
+
+    scrcpy v3 格式：type(1) + sequence(8) + paste(1) + length(4) + text
+    """
+    text_bytes = text.encode("utf-8")
+    return struct.pack(
+        ">BqBI",
+        CONTROL_TYPE_SET_CLIPBOARD,
+        0,  # sequence
+        1 if paste else 0,
+        len(text_bytes),
+    ) + text_bytes
+
+
+def encode_rotate_device() -> bytes:
+    """旋转设备屏幕。"""
+    return struct.pack(">B", CONTROL_TYPE_ROTATE_DEVICE)
