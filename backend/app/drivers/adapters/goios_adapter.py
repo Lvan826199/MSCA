@@ -142,3 +142,18 @@ class GoIOSAdapter(IOSAdapterBase):
         except Exception as e:
             logger.error(f"[{self.udid}] 获取设备信息失败: {e}")
             return {"udid": self.udid}
+
+    async def install_app(self, ipa_path: str) -> tuple[bool, str]:
+        """安装 IPA 到 iOS 设备。
+
+        Returns:
+            (success, message)
+        """
+        try:
+            output = await self._run_cmd(
+                "install", f"--path={ipa_path}", f"--udid={self.udid}"
+            )
+            logger.info(f"[{self.udid}] IPA 安装成功: {output[:200]}")
+            return True, "IPA 安装成功"
+        except Exception as e:
+            return False, str(e)

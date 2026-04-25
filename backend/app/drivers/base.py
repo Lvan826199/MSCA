@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Callable
 
 
 @dataclass
@@ -21,6 +22,13 @@ class ControlEvent:
             self.params = {}
 
 
+@dataclass
+class InstallResult:
+    success: bool
+    message: str = ""
+    package_name: str = ""
+
+
 class AbstractDeviceDriver(ABC):
     """设备驱动抽象基类，所有平台驱动必须实现此接口。"""
 
@@ -39,3 +47,9 @@ class AbstractDeviceDriver(ABC):
     @abstractmethod
     async def get_screenshot(self) -> bytes:
         """获取当前屏幕截图。"""
+
+    async def install_app(
+        self, file_path: str, callback: Callable[[str], None] | None = None
+    ) -> InstallResult:
+        """安装应用到设备。子类可选实现。"""
+        return InstallResult(success=False, message="此设备不支持应用安装")

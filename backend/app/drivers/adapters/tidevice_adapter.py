@@ -122,3 +122,17 @@ class TideviceAdapter(IOSAdapterBase):
         except Exception as e:
             logger.error(f"[{self.udid}] 获取设备信息失败: {e}")
             return {"udid": self.udid}
+
+    async def install_app(self, ipa_path: str) -> tuple[bool, str]:
+        """安装 IPA 到 iOS 设备（通过 tidevice）。"""
+        try:
+            import tidevice
+
+            td = tidevice.Device(self.udid)
+            await asyncio.get_event_loop().run_in_executor(
+                None, td.app_install, ipa_path
+            )
+            logger.info(f"[{self.udid}] IPA 安装成功 (tidevice)")
+            return True, "IPA 安装成功"
+        except Exception as e:
+            return False, str(e)

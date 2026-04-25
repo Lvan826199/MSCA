@@ -10,7 +10,7 @@ from typing import Callable
 
 import aiohttp
 
-from app.drivers.base import AbstractDeviceDriver, ControlEvent, MirrorOptions
+from app.drivers.base import AbstractDeviceDriver, ControlEvent, InstallResult, MirrorOptions
 from app.drivers.adapters.base import IOSAdapterBase
 
 logger = logging.getLogger(__name__)
@@ -203,6 +203,29 @@ class IOSDriver(AbstractDeviceDriver):
         except Exception as e:
             logger.error(f"[{self.device_id}] 截图失败: {e}")
         return b""
+
+    async def install_app(
+        self, file_path: str, callback: Callable[[str], None] | None = None
+    ) -> InstallResult:
+        """安装 IPA 到 iOS 设备。"""
+        import os
+
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext != ".ipa":
+            return InstallResult(
+                success=False,
+                message=f"iOS 仅支持 .ipa 文件，收到: {ext}",
+            )
+
+        if callback:
+            callback("正在安装 IPA...")
+
+        success, message = await self._adapter.install_app(file_path)
+
+        if callback:
+            callback("安装完成" if success else f"安装失败: {message}")
+
+        return InstallResult(success=success, message=message)
 
     def subscribe_video(self) -> asyncio.Queue:
         """订阅 MJPEG 视频帧。"""

@@ -5,8 +5,15 @@
 
 import asyncio
 import logging
+import os
+import subprocess
+import tempfile
+import zipfile
+from typing import Callable
 
-from app.drivers.base import AbstractDeviceDriver, ControlEvent, MirrorOptions
+import adbutils
+
+from app.drivers.base import AbstractDeviceDriver, ControlEvent, InstallResult, MirrorOptions
 from app.scrcpy.protocol import (
     ACTION_DOWN,
     ACTION_MOVE,
@@ -214,3 +221,74 @@ class AndroidDriver(AbstractDeviceDriver):
 
         logger.warning(f"未知控制指令: {action}")
         return None
+
+    async def install_app(
+        self, file_path: str, callback: Callable[[str], None] | None = None
+    ) -> InstallResult:
+        """安装 APK/APKS 到 Android 设备。"""
+        ext = os.path.splitext(file_path)[1].lower()
+
+        try:
+            if ext == ".apk":
+                return await self._install_apk(file_path, callback)
+            elif ext == ".apks":
+                return await self._install_apks(file_path, callback)
+            else:
+                return InstallResult(
+                    success=False,
+                    message=f"不支持的文件格式: {ext}（支持 .apk, .apks）",
+                )
+        except Exception as e:
+            logger.error(f"[{self.device_serial}] 安装失败: {e}")
+            return InstallResult(success=False, message=str(e))
+
+    async def _install_apk(
+        self, file_path: str, callback: Callable[[str], None] | None
+    ) -> InstallResult:
+        """安装单个 APK 文件。"""
+        device = adbutils.adb.device(serial=self.device_serial)
+
+        def _progress(msg: str):
+            if callback:
+                callback(msg)
+
+        _progress("正在安装 APK...")
+        await asyncio.to_thread(
+            device.install, file_path, silent=True, callback=_progress
+        )
+        _progress("安装完成")
+        return InstallResult(success=True, message="APK 安装成功")
+
+    async def _install_apks(
+        self, file_path: str, callback: Callable[[str], None] | None
+    ) -> InstallResult:
+        """安装 APKS 文件（split APKs 压缩包）。"""
+        def _progress(msg: str):
+            if callback:
+                callback(msg)
+
+        _progress("正在解压 APKS...")
+
+        # APKS 是 zip 格式，内含多个 split APK
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                apk_files = [n for n in zf.namelist() if n.endswith(".apk")]
+                if not apk_files:
+                    return InstallResult(success=False, message="APKS 中未找到 APK 文件")
+                zf.extractall(tmpdir, apk_files)
+
+            apk_paths = [os.path.join(tmpdir, f) for f in apk_files]
+            _progress(f"正在安装 {len(apk_paths)} 个 split APK...")
+
+            # 使用 adb install-multiple 命令
+            cmd = ["adb", "-s", self.device_serial, "install-multiple", "-r"] + apk_paths
+            proc = await asyncio.to_thread(
+                subprocess.run, cmd, capture_output=True, text=True, timeout=120
+            )
+
+            if proc.returncode == 0:
+                _progress("安装完成")
+                return InstallResult(success=True, message="APKS 安装成功")
+            else:
+                err = proc.stderr.strip() or proc.stdout.strip()
+                return InstallResult(success=False, message=f"安装失败: {err}")

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.devices import router as devices_router
 from app.api.health import router as health_router
+from app.api.install import router as install_router
 from app.api.mirror import router as mirror_router
 from app.core.device_manager import device_manager
 from app.websocket.devices import router as ws_devices_router
@@ -34,6 +35,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(devices_router, prefix="/api")
 app.include_router(mirror_router, prefix="/api")
+app.include_router(install_router, prefix="/api")
 app.include_router(ws_router)
 app.include_router(ws_devices_router)
 app.include_router(ws_video_router)

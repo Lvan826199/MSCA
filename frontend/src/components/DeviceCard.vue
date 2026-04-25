@@ -54,20 +54,21 @@
       >
         投屏
       </el-button>
-      <el-dropdown
-        v-if="device.platform === 'android'"
-        trigger="click"
-        @command="onMoreAction"
+      <el-button
+        size="small"
+        :disabled="device.status !== 'online' || installing"
+        :loading="installing"
+        @click="triggerInstall"
       >
-        <el-button size="small" :icon="MoreFilled" />
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="install">安装 APK</el-dropdown-item>
-            <el-dropdown-item command="screenshot">截图</el-dropdown-item>
-            <el-dropdown-item command="shell">ADB Shell</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
+        {{ installing ? '安装中' : '安装应用' }}
+      </el-button>
+      <input
+        ref="fileInput"
+        type="file"
+        :accept="installAccept"
+        style="display: none"
+        @change="onFileSelected"
+      />
     </div>
   </el-card>
 </template>
@@ -75,9 +76,9 @@
 <script setup>
 import { computed, ref } from "vue"
 import { useRouter } from "vue-router"
-import { MoreFilled } from "@element-plus/icons-vue"
 import { ElMessage } from "element-plus"
 import { useSettings } from "@/composables/useSettings"
+import { useConnection } from "@/composables/useConnection"
 
 const props = defineProps({
   device: { type: Object, required: true },
@@ -85,9 +86,12 @@ const props = defineProps({
 
 const router = useRouter()
 const { getDeviceAlias, setDeviceAlias } = useSettings()
+const { getBackendUrl } = useConnection()
 
 const editingAlias = ref(false)
 const aliasInput = ref("")
+const installing = ref(false)
+const fileInput = ref(null)
 
 const displayName = computed(() => {
   const alias = getDeviceAlias(props.device.id)
@@ -134,8 +138,42 @@ function onMirror() {
   router.push({ path: "/mirror", query: { device: props.device.id } })
 }
 
-function onMoreAction(command) {
-  ElMessage.info(`「${command}」功能开发中`)
+const installAccept = computed(() => {
+  return props.device.platform === "android" ? ".apk,.apks" : ".ipa"
+})
+
+function triggerInstall() {
+  fileInput.value?.click()
+}
+
+async function onFileSelected(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  // 重置 input 以便重复选择同一文件
+  e.target.value = ""
+
+  installing.value = true
+  try {
+    const formData = new FormData()
+    formData.append("file", file)
+
+    const base = getBackendUrl()
+    const res = await fetch(`${base}/api/install/${props.device.id}`, {
+      method: "POST",
+      body: formData,
+    })
+
+    const data = await res.json()
+    if (data.success) {
+      ElMessage.success(`${file.name} 安装成功`)
+    } else {
+      ElMessage.error(data.message || "安装失败")
+    }
+  } catch (err) {
+    ElMessage.error(`安装出错: ${err.message}`)
+  } finally {
+    installing.value = false
+  }
 }
 </script>
 <style scoped>
