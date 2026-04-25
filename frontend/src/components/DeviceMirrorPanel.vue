@@ -54,6 +54,7 @@ import { Close, Loading } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
 import { useVideoDecoder } from "@/composables/useVideoDecoder"
 import { useDeviceControl } from "@/composables/useDeviceControl"
+import { useSettings } from "@/composables/useSettings"
 import DeviceControlBar from "./DeviceControlBar.vue"
 
 const props = defineProps({
@@ -82,6 +83,9 @@ const {
 
 const control = useDeviceControl(props.deviceId)
 
+// 投屏参数从持久化设置读取
+const { getMirrorOptions } = useSettings()
+
 function getApiBase() {
   const { getBackendUrl } = useConnection()
   return getBackendUrl()
@@ -97,7 +101,11 @@ async function startMirror() {
     const res = await fetch(`${getApiBase()}/api/mirror/${props.deviceId}/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ max_fps: 30, bitrate: 8000000, max_size: 0 }),
+      body: JSON.stringify({
+        max_fps: getMirrorOptions().maxFps,
+        bitrate: getMirrorOptions().bitrate,
+        max_size: getMirrorOptions().maxSize,
+      }),
     })
 
     if (!res.ok) {

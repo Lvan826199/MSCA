@@ -81,14 +81,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from "vue"
+import { ref, computed, onMounted, onUnmounted, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { ArrowLeft, Plus } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
+import { useSettings } from "@/composables/useSettings"
 import DeviceMirrorPanel from "@/components/DeviceMirrorPanel.vue"
 
 const route = useRoute()
 const router = useRouter()
+const { settings: appSettings } = useSettings()
 
 // 当前投屏设备列表
 const devices = ref([])
@@ -97,7 +99,12 @@ const showAddDevice = ref(false)
 const selectedDevices = ref([])
 const allDevices = ref([])
 const syncMode = ref(false)
-const gridColumns = ref(0) // 0 = 自动
+const gridColumns = ref(appSettings.value.layout.gridColumns)
+
+// 同步 gridColumns 到持久化设置
+watch(gridColumns, (val) => {
+  appSettings.value.layout.gridColumns = val
+})
 
 // 根据设备数量或手动选择计算网格 class
 const gridClass = computed(() => {
