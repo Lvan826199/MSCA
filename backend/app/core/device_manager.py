@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import shutil
 
 import adbutils
 
@@ -9,16 +11,47 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2.5  # 秒
 
+# iOS 版本阈值：≤15.x 用 tidevice，≥16.x 用 go-ios
+IOS_GOIOS_MIN_VERSION = 16
+
+
+def _parse_ios_major(version: str) -> int:
+    """解析 iOS 版本号的主版本。"""
+    try:
+        return int(version.split(".")[0])
+    except (ValueError, IndexError):
+        return 0
+
+
+def _find_goios_bin() -> str:
+    """查找 go-ios 可执行文件路径，优先项目内 bin/ios/ios.exe。"""
+    # 项目根目录（backend/ 的上一级）
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    project_root = os.path.dirname(backend_dir)
+    local_bin = os.path.join(project_root, "bin", "ios", "ios.exe")
+    if os.path.isfile(local_bin):
+        return local_bin
+    # 系统 PATH
+    system_bin = shutil.which("ios")
+    if system_bin:
+        return system_bin
+    return ""
+
 
 class DeviceManager:
-    """设备管理器：轮询 ADB + iOS 设备列表，检测插拔变化，通知订阅者。"""
+    """设备管理器：轮询 ADB + iOS 设备列表，检测插拔变化，通知订阅者。
+
+    同时支持 tidevice（iOS ≤15.x）和 go-ios（iOS ≥16.x），根据设备版本自动选择。
+    """
 
     def __init__(self):
         self._devices: dict[str, DeviceInfo] = {}
         self._subscribers: list[asyncio.Queue] = []
         self._poll_task: asyncio.Task | None = None
         self._ios_enabled = False
-        self._ios_adapter_class = None
+        self._tidevice_available = False
+        self._goios_available = False
+        self._goios_bin = ""
 
     @property
     def devices(self) -> list[DeviceInfo]:
@@ -49,28 +82,26 @@ class DeviceManager:
         return self.devices
 
     def _detect_ios_support(self):
-        """检测 iOS 支持库是否可用。"""
+        """检测 iOS 支持库是否可用（tidevice 和 go-ios 可同时启用）。"""
+        # 检测 tidevice
         try:
-            from app.drivers.adapters.tidevice_adapter import TideviceAdapter
-            self._ios_adapter_class = TideviceAdapter
-            self._ios_enabled = True
-            logger.info("iOS 支持已启用 (tidevice)")
-            return
+            import tidevice  # noqa: F401
+            self._tidevice_available = True
+            logger.info("iOS 支持: tidevice 可用（适用于 iOS ≤15.x）")
         except ImportError:
-            pass
+            logger.info("iOS 支持: tidevice 不可用")
 
-        try:
-            import shutil
-            if shutil.which("ios"):
-                from app.drivers.adapters.goios_adapter import GoIOSAdapter
-                self._ios_adapter_class = GoIOSAdapter
-                self._ios_enabled = True
-                logger.info("iOS 支持已启用 (go-ios)")
-                return
-        except Exception:
-            pass
+        # 检测 go-ios
+        self._goios_bin = _find_goios_bin()
+        if self._goios_bin:
+            self._goios_available = True
+            logger.info(f"iOS 支持: go-ios 可用 @ {self._goios_bin}（适用于 iOS ≥16.x）")
+        else:
+            logger.info("iOS 支持: go-ios 不可用")
 
-        logger.info("iOS 支持未启用（tidevice 和 go-ios 均不可用）")
+        self._ios_enabled = self._tidevice_available or self._goios_available
+        if not self._ios_enabled:
+            logger.info("iOS 支持未启用（tidevice 和 go-ios 均不可用）")
 
     async def _poll_loop(self):
         while True:
@@ -128,30 +159,88 @@ class DeviceManager:
         return devices
 
     async def _get_ios_devices(self) -> list[DeviceInfo]:
-        """获取 iOS 设备列表。"""
-        if not self._ios_adapter_class:
-            return []
+        """获取 iOS 设备列表（合并 tidevice 和 go-ios 结果，去重）。"""
+        seen_udids: set[str] = set()
+        devices: list[DeviceInfo] = []
 
-        adapter = self._ios_adapter_class(udid="")
-        raw_devices = await adapter.list_devices()
+        # tidevice 扫描
+        if self._tidevice_available:
+            try:
+                from app.drivers.adapters.tidevice_adapter import TideviceAdapter
+                adapter = TideviceAdapter(udid="")
+                for d in await adapter.list_devices():
+                    udid = d.get("udid", "")
+                    if not udid or udid in seen_udids:
+                        continue
+                    seen_udids.add(udid)
+                    devices.append(DeviceInfo(
+                        id=udid,
+                        platform="ios",
+                        model=d.get("model", "") or d.get("name", ""),
+                        version=d.get("version", ""),
+                        resolution="",
+                        status="online",
+                    ))
+            except Exception as e:
+                logger.debug(f"tidevice 设备扫描失败: {e}")
 
-        devices = []
-        for d in raw_devices:
-            devices.append(DeviceInfo(
-                id=d.get("udid", ""),
-                platform="ios",
-                model=d.get("model", "") or d.get("name", ""),
-                version=d.get("version", ""),
-                resolution="",
-                status="online",
-            ))
+        # go-ios 扫描（补充 tidevice 未发现的设备）
+        if self._goios_available:
+            try:
+                from app.drivers.adapters.goios_adapter import GoIOSAdapter
+                adapter = GoIOSAdapter(udid="", ios_bin=self._goios_bin)
+                for d in await adapter.list_devices():
+                    udid = d.get("udid", "")
+                    if not udid or udid in seen_udids:
+                        continue
+                    seen_udids.add(udid)
+                    devices.append(DeviceInfo(
+                        id=udid,
+                        platform="ios",
+                        model=d.get("model", "") or d.get("name", ""),
+                        version=d.get("version", ""),
+                        resolution="",
+                        status="online",
+                    ))
+            except Exception as e:
+                logger.debug(f"go-ios 设备扫描失败: {e}")
+
         return devices
 
-    def create_ios_adapter(self, udid: str):
-        """为指定 iOS 设备创建适配器实例。"""
-        if not self._ios_adapter_class:
-            raise RuntimeError("iOS 支持未启用")
-        return self._ios_adapter_class(udid=udid)
+    def create_ios_adapter(self, udid: str, version: str = ""):
+        """为指定 iOS 设备创建适配器实例，根据版本自动选择。
+
+        Args:
+            udid: 设备 UDID
+            version: iOS 版本号（如 "15.1"、"18.3"），为空时从已知设备中查找
+        """
+        # 尝试从已知设备中获取版本
+        if not version:
+            dev = self._devices.get(udid)
+            if dev:
+                version = dev.version
+
+        major = _parse_ios_major(version)
+
+        # iOS ≤15.x 优先 tidevice，≥16.x 优先 go-ios
+        if major > 0 and major < IOS_GOIOS_MIN_VERSION:
+            if self._tidevice_available:
+                from app.drivers.adapters.tidevice_adapter import TideviceAdapter
+                return TideviceAdapter(udid=udid)
+            elif self._goios_available:
+                logger.warning(f"[{udid}] iOS {version} 推荐 tidevice，但不可用，回退到 go-ios")
+                from app.drivers.adapters.goios_adapter import GoIOSAdapter
+                return GoIOSAdapter(udid=udid, ios_bin=self._goios_bin)
+        else:
+            if self._goios_available:
+                from app.drivers.adapters.goios_adapter import GoIOSAdapter
+                return GoIOSAdapter(udid=udid, ios_bin=self._goios_bin)
+            elif self._tidevice_available:
+                logger.warning(f"[{udid}] iOS {version} 推荐 go-ios，但不可用，回退到 tidevice")
+                from app.drivers.adapters.tidevice_adapter import TideviceAdapter
+                return TideviceAdapter(udid=udid)
+
+        raise RuntimeError("iOS 支持未启用（tidevice 和 go-ios 均不可用）")
 
     async def _notify(self):
         data = [d.model_dump() for d in self._devices.values()]

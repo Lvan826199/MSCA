@@ -49,6 +49,7 @@
         v-for="id in devices"
         :key="id"
         :device-id="id"
+        :device-name="getDeviceName(id)"
         :sync-mode="syncMode"
         :sync-broadcast="broadcastControl"
         :ref="(el) => setPanelRef(id, el)"
@@ -130,6 +131,11 @@ function setPanelRef(id, el) {
   } else {
     delete panelRefs.value[id]
   }
+}
+
+function getDeviceName(deviceId) {
+  const dev = allDevices.value.find((d) => d.id === deviceId)
+  return dev?.model || ""
 }
 
 function getApiBase() {

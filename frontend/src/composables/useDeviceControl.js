@@ -66,6 +66,7 @@ export function useDeviceControl(deviceId) {
   let canvasEl = null
   let videoWidth = 0
   let videoHeight = 0
+  let _onSyncEvent = null  // 同步事件回调
 
   function connect() {
     if (ws) return
@@ -203,24 +204,51 @@ export function useDeviceControl(deviceId) {
 
   let mouseDown = false
 
+  function _emitSync(cmd) {
+    if (_onSyncEvent && videoWidth && videoHeight) {
+      // 归一化坐标（0~1），便于不同分辨率设备间同步
+      if (cmd.x !== undefined) {
+        _onSyncEvent({
+          ...cmd,
+          nx: cmd.x / videoWidth,
+          ny: cmd.y / videoHeight,
+        })
+      } else {
+        _onSyncEvent(cmd)
+      }
+    }
+  }
+
   function onMouseDown(e) {
     if (e.button !== 0) return
     mouseDown = true
     const pos = canvasToDevice(e.clientX, e.clientY)
-    if (pos) send({ type: "touch", action: "down", ...pos })
+    if (pos) {
+      const cmd = { type: "touch", action: "down", ...pos }
+      send(cmd)
+      _emitSync(cmd)
+    }
   }
 
   function onMouseMove(e) {
     if (!mouseDown) return
     const pos = canvasToDevice(e.clientX, e.clientY)
-    if (pos) send({ type: "touch", action: "move", ...pos })
+    if (pos) {
+      const cmd = { type: "touch", action: "move", ...pos }
+      send(cmd)
+      _emitSync(cmd)
+    }
   }
 
   function onMouseUp(e) {
     if (!mouseDown) return
     mouseDown = false
     const pos = canvasToDevice(e.clientX, e.clientY)
-    if (pos) send({ type: "touch", action: "up", ...pos })
+    if (pos) {
+      const cmd = { type: "touch", action: "up", ...pos }
+      send(cmd)
+      _emitSync(cmd)
+    }
   }
 
   function onWheel(e) {
@@ -301,6 +329,28 @@ export function useDeviceControl(deviceId) {
   function sendClipboard(text, paste = false) { if (text) send({ type: "clipboard", text, paste }) }
   function sendRotate() { send({ type: "rotate" }) }
 
+  /**
+   * 接收归一化触控事件（来自同步广播），转换为本设备坐标后发送
+   */
+  function sendNormalizedTouch(evt) {
+    if (!videoWidth || !videoHeight) return
+    send({
+      type: evt.type,
+      action: evt.action,
+      x: Math.round(evt.nx * videoWidth),
+      y: Math.round(evt.ny * videoHeight),
+      width: videoWidth,
+      height: videoHeight,
+    })
+  }
+
+  /**
+   * 设置同步事件回调（触控操作时触发）
+   */
+  function setSyncCallback(fn) {
+    _onSyncEvent = fn
+  }
+
   // 更新视频尺寸（屏幕旋转时由外部调用）
   function updateVideoSize(vw, vh) {
     videoWidth = vw
@@ -332,5 +382,7 @@ export function useDeviceControl(deviceId) {
     sendCollapsePanels,
     sendClipboard,
     sendRotate,
+    sendNormalizedTouch,
+    setSyncCallback,
   }
 }

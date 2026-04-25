@@ -1,7 +1,7 @@
 <template>
   <div class="mirror-panel" :class="{ fullscreen: isFullscreen }" @dblclick="toggleFullscreen">
     <div class="panel-header">
-      <span class="panel-device-name">{{ deviceId }}</span>
+      <span class="panel-device-name">{{ displayName }}</span>
       <div class="panel-status">
         <span v-if="mirroring" class="fps-badge">{{ fps }} FPS</span>
         <span v-if="videoWidth" class="res-badge">{{ videoWidth }}x{{ videoHeight }}</span>
@@ -49,7 +49,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick, watch } from "vue"
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from "vue"
 import { Close, Loading } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
 import { useVideoDecoder } from "@/composables/useVideoDecoder"
@@ -59,11 +59,25 @@ import DeviceControlBar from "./DeviceControlBar.vue"
 
 const props = defineProps({
   deviceId: { type: String, required: true },
+  deviceName: { type: String, default: "" },
   syncMode: { type: Boolean, default: false },
   syncBroadcast: { type: Function, default: null },
 })
 
 const emit = defineEmits(["started", "stopped", "error"])
+
+const { getDeviceAlias } = useSettings()
+
+// 显示名称优先级：别名 > 传入名称 > 设备 ID 截断
+const displayName = computed(() => {
+  const alias = getDeviceAlias(props.deviceId)
+  if (alias) return alias
+  if (props.deviceName) return props.deviceName
+  // 截断长 ID
+  return props.deviceId.length > 16
+    ? props.deviceId.slice(0, 12) + "..."
+    : props.deviceId
+})
 
 const starting = ref(false)
 const mirroring = ref(false)
@@ -165,6 +179,13 @@ function syncAction(method, ...args) {
     props.syncBroadcast(props.deviceId, method, args)
   }
 }
+
+// 触控同步：在同步模式下将归一化触控事件广播到其他面板
+control.setSyncCallback((evt) => {
+  if (props.syncMode && props.syncBroadcast) {
+    props.syncBroadcast(props.deviceId, "sendNormalizedTouch", [evt])
+  }
+})
 
 // 视频尺寸就绪/变化后绑定或更新触控事件
 let controlBound = false

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Nuitka 编译后端为独立可执行文件
 # 用法: 在项目根目录执行 npm run backend:build
+# 产物输出到 dist/backend/
 
 set -e
+
+DIST_DIR="dist/backend"
 
 echo "[build] 开始编译后端..."
 
@@ -25,8 +28,16 @@ uv run python -m nuitka \
   --follow-imports \
   __main__.py
 
-# 移动产物到 resources 目录
-mkdir -p ../resources
-mv msca-backend.exe ../resources/msca-backend.exe 2>/dev/null || mv __main__.exe ../resources/msca-backend.exe 2>/dev/null || true
+cd ..
 
-echo "[build] 后端编译完成 -> resources/msca-backend.exe"
+# 移动产物到 dist/backend 目录
+mkdir -p "$DIST_DIR"
+mv backend/msca-backend.exe "$DIST_DIR/msca-backend.exe" 2>/dev/null \
+  || mv backend/__main__.exe "$DIST_DIR/msca-backend.exe" 2>/dev/null \
+  || true
+
+# 同时复制一份到 resources（Electron 打包需要）
+mkdir -p resources
+cp "$DIST_DIR/msca-backend.exe" resources/msca-backend.exe 2>/dev/null || true
+
+echo "[build] 后端编译完成 -> $DIST_DIR/msca-backend.exe"

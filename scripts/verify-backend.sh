@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 # 验证打包后的后端可执行文件是否正常运行
 # 用法: npm run backend:verify
+# 优先检查 dist/backend/，回退到 resources/
 
 set -e
 
-EXE="resources/msca-backend.exe"
-PORT=18099
-TIMEOUT=15
-
-if [ ! -f "$EXE" ]; then
-  echo "[verify] 错误: $EXE 不存在，请先执行 npm run backend:build"
+# 查找可执行文件
+if [ -f "dist/backend/msca-backend.exe" ]; then
+  EXE="dist/backend/msca-backend.exe"
+elif [ -f "resources/msca-backend.exe" ]; then
+  EXE="resources/msca-backend.exe"
+else
+  echo "[verify] 错误: msca-backend.exe 不存在，请先执行 npm run backend:build"
   exit 1
 fi
+
+PORT=18099
+TIMEOUT=15
 
 echo "[verify] 启动 $EXE (端口 $PORT)..."
 "$EXE" --port $PORT &

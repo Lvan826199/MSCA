@@ -11,6 +11,7 @@ dependencies = [
     "aiohttp>=3.9.0",
     # iOS 支持按需添加：
     # "tidevice>=0.10.0",
+    "tidevice>=0.12.11",
 ]
 
 # 可选开发依赖（按需手动安装，不写入锁文件）
