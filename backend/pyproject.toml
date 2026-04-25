@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn>=0.32.0",
     "adbutils>=2.8.0",
     "websockets>=13.0",
+    "aiohttp>=3.9.0",
     # iOS 支持按需添加：
     # "tidevice>=0.10.0",
 ]

@@ -25,8 +25,9 @@ export function useVideoDecoder(deviceId) {
   let decoder = null
   let frameCount = 0
   let fpsTimer = null
-  let hasDescription = false // 是否成功构建了 AVC description
+  let hasDescription = false
   let timestampCounter = 0
+  let codecMode = "h264" // "h264" | "mjpeg"
 
   // ─── NAL 解析工具 ───
 
@@ -195,11 +196,17 @@ export function useVideoDecoder(deviceId) {
       if (msg.type === "config") {
         videoWidth.value = msg.width
         videoHeight.value = msg.height
+        codecMode = msg.codec || "h264"
       }
     } catch { /* ignore */ }
   }
 
   function handleBinaryFrame(buffer) {
+    if (codecMode === "mjpeg") {
+      handleMjpegFrame(buffer)
+      return
+    }
+
     const view = new Uint8Array(buffer)
     if (view.length < 2) return
 
@@ -246,6 +253,33 @@ export function useVideoDecoder(deviceId) {
         resetDecoder()
       }
     }
+  }
+
+  // ─── MJPEG 帧处理（iOS） ───
+
+  function handleMjpegFrame(buffer) {
+    const canvas = canvasRef.value
+    if (!canvas) return
+    const ctx = canvas.getContext("2d")
+
+    const blob = new Blob([buffer], { type: "image/jpeg" })
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+
+    img.onload = () => {
+      if (canvas.width !== img.width || canvas.height !== img.height) {
+        canvas.width = img.width
+        canvas.height = img.height
+        videoWidth.value = img.width
+        videoHeight.value = img.height
+      }
+      ctx.drawImage(img, 0, 0)
+      URL.revokeObjectURL(url)
+      frameCount++
+    }
+
+    img.onerror = () => URL.revokeObjectURL(url)
+    img.src = url
   }
 
   // ─── 解码器管理 ───

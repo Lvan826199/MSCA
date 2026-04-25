@@ -10,6 +10,8 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.api.mirror import get_active_driver
+from app.drivers.ios import IOSDriver
+from app.drivers.base import ControlEvent
 from app.scrcpy import protocol
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,12 @@ async def control_websocket(websocket: WebSocket, device_id: str):
                     await websocket.send_json({"error": "设备未在投屏中"})
                     continue
 
+                # iOS 设备走 WDA REST API
+                if isinstance(driver, IOSDriver):
+                    await _handle_ios_command(driver, cmd_type, data, websocket)
+                    continue
+
+                # Android 设备走 scrcpy 二进制协议
                 manager = driver._server_manager
                 if not manager or not manager.running:
                     await websocket.send_json({"error": "投屏会话未就绪"})
@@ -168,3 +176,57 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
         return protocol.encode_rotate_device()
 
     return None
+
+
+async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, websocket):
+    """处理 iOS 设备控制指令，转换为 WDA REST API 调用。"""
+    try:
+        if cmd_type == "touch":
+            action = data.get("action", "")
+            x = int(data.get("x", 0))
+            y = int(data.get("y", 0))
+            # iOS 只处理 down（tap）和 move（swipe 由前端组合 down+move+up）
+            if action == "down":
+                await driver.send_event(ControlEvent("tap", {"x": x, "y": y}))
+
+        elif cmd_type == "key":
+            keycode = int(data.get("keycode", 0))
+            # 映射 Android keycode 到 iOS 操作
+            key_map = {3: "home", 26: "lock", 24: "volumeUp", 25: "volumeDown"}
+            key = key_map.get(keycode)
+            if key:
+                await driver.send_event(ControlEvent("keyevent", {"key": key}))
+
+        elif cmd_type == "text":
+            text = data.get("text", "")
+            if text:
+                await driver.send_event(ControlEvent("text", {"text": text}))
+
+        elif cmd_type == "back":
+            # iOS 没有返回键，忽略
+            pass
+
+        elif cmd_type == "home":
+            await driver.send_event(ControlEvent("keyevent", {"key": "home"}))
+
+        elif cmd_type == "power":
+            await driver.send_event(ControlEvent("keyevent", {"key": "lock"}))
+
+        elif cmd_type == "scroll":
+            # iOS 滑动模拟
+            x = int(data.get("x", 0))
+            y = int(data.get("y", 0))
+            v_scroll = int(data.get("vScroll", 0))
+            dy = -v_scroll * 100  # 转换为像素偏移
+            await driver.send_event(ControlEvent("swipe", {
+                "fromX": x, "fromY": y,
+                "toX": x, "toY": y + dy,
+                "duration": 0.3,
+            }))
+
+        else:
+            await websocket.send_json({"error": f"iOS 不支持指令: {cmd_type}"})
+
+    except Exception as e:
+        logger.error(f"iOS 控制指令失败: {e}")
+        await websocket.send_json({"error": str(e)})

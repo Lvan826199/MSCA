@@ -1,4 +1,7 @@
-"""投屏 REST API：启动/停止投屏、查询投屏状态。"""
+"""投屏 REST API：启动/停止投屏、查询投屏状态。
+
+支持 Android（scrcpy H.264）和 iOS（WDA MJPEG）设备。
+"""
 
 import logging
 
@@ -6,24 +9,37 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.drivers.android import AndroidDriver
-from app.drivers.base import MirrorOptions
+from app.drivers.base import AbstractDeviceDriver, MirrorOptions
+from app.core.device_manager import device_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 全局驱动实例注册表：device_serial → AndroidDriver
-_drivers: dict[str, AndroidDriver] = {}
+# 全局驱动实例注册表：device_serial → Driver
+_drivers: dict[str, AbstractDeviceDriver] = {}
 
 
-def get_driver(device_id: str) -> AndroidDriver:
-    """获取或创建设备驱动实例。"""
+def get_driver(device_id: str) -> AbstractDeviceDriver:
+    """获取或创建设备驱动实例（自动识别平台）。"""
     if device_id not in _drivers:
-        _drivers[device_id] = AndroidDriver(device_id)
+        # 查询设备平台
+        device_info = None
+        for d in device_manager.devices:
+            if d.id == device_id:
+                device_info = d
+                break
+
+        if device_info and device_info.platform == "ios":
+            from app.drivers.ios import IOSDriver
+            adapter = device_manager.create_ios_adapter(device_id)
+            _drivers[device_id] = IOSDriver(device_id, adapter)
+        else:
+            _drivers[device_id] = AndroidDriver(device_id)
     return _drivers[device_id]
 
 
-def get_active_driver(device_id: str) -> AndroidDriver:
+def get_active_driver(device_id: str) -> AbstractDeviceDriver:
     """获取正在投屏的驱动实例，不存在则抛 404。"""
     driver = _drivers.get(device_id)
     if not driver or not driver.is_mirroring:

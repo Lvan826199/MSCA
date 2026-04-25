@@ -1,14 +1,10 @@
-"""视频流 WebSocket 端点：将 H.264 帧实时推送给前端。
+"""视频流 WebSocket 端点：将视频帧实时推送给前端。
+
+支持两种流协议：
+- Android (H.264)：scrcpy 二进制帧，前端 WebCodecs 解码
+- iOS (MJPEG)：JPEG 帧序列，前端 img/Canvas 渲染
 
 端点：/ws/video/{device_id}
-协议：
-- 服务端发送二进制帧（H.264 NAL 数据）
-- 首帧为 codec 配置帧（SPS/PPS + IDR），前端用于初始化 VideoDecoder
-- 后续帧为视频数据，前端通过 WebCodecs 解码渲染
-- 客户端可发送 JSON 控制消息（如 ping/pong 心跳）
-
-注意：scrcpy 可能将 SPS/PPS 和 IDR 分成不同的 packet 发送，
-后端需要缓冲 config NAL，确保发给前端的关键帧包含完整的 SPS+PPS+IDR。
 """
 
 import asyncio
@@ -17,6 +13,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.api.mirror import get_active_driver
+from app.drivers.ios import IOSDriver
 from app.scrcpy.protocol import (
     NAL_TYPE_MASK,
     NAL_IDR,
@@ -53,12 +50,7 @@ def _has_idr(data: bytes) -> bool:
 
 @router.websocket("/ws/video/{device_id}")
 async def video_stream(websocket: WebSocket, device_id: str):
-    """视频流 WebSocket 端点。
-
-    前端连接后，订阅对应设备的视频帧队列，持续推送 H.264 数据。
-    如果 scrcpy 将 SPS/PPS 和 IDR 分开发送，后端会缓冲 config 数据，
-    等 IDR 到来时合并为一个完整的关键帧再推送。
-    """
+    """视频流 WebSocket 端点。根据设备平台选择 H.264 或 MJPEG 协议。"""
     await websocket.accept()
     logger.info(f"[{device_id}] 视频 WS 已连接")
 
@@ -68,6 +60,57 @@ async def video_stream(websocket: WebSocket, device_id: str):
         await websocket.close(code=4004, reason=f"设备 {device_id} 未在投屏")
         return
 
+    if isinstance(driver, IOSDriver):
+        await _stream_mjpeg(websocket, device_id, driver)
+    else:
+        await _stream_h264(websocket, device_id, driver)
+
+
+async def _stream_mjpeg(websocket: WebSocket, device_id: str, driver: IOSDriver):
+    """iOS MJPEG 流推送。"""
+    queue = driver.subscribe_video()
+
+    w, h = driver.screen_size
+    await websocket.send_json({
+        "type": "config",
+        "width": w,
+        "height": h,
+        "codec": "mjpeg",
+    })
+
+    frame_count = 0
+    try:
+        while True:
+            try:
+                frame = await asyncio.wait_for(queue.get(), timeout=5.0)
+            except TimeoutError:
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
+                continue
+
+            if frame is None:
+                continue
+
+            try:
+                # MJPEG 帧直接发送二进制 JPEG 数据
+                await websocket.send_bytes(frame)
+                frame_count += 1
+            except Exception:
+                break
+
+    except WebSocketDisconnect:
+        logger.info(f"[{device_id}] 视频 WS 断开 (MJPEG)")
+    except Exception as e:
+        logger.error(f"[{device_id}] 视频 WS 异常 (MJPEG): {e}")
+    finally:
+        driver.unsubscribe_video(queue)
+        logger.info(f"[{device_id}] 视频 WS 清理完成 (MJPEG)，共发送 {frame_count} 帧")
+
+
+async def _stream_h264(websocket: WebSocket, device_id: str, driver):
+    """Android H.264 流推送。"""
     queue = driver.subscribe_video()
 
     w, h = driver.screen_size
