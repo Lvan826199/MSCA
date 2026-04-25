@@ -24,13 +24,27 @@ def _parse_ios_major(version: str) -> int:
 
 
 def _find_goios_bin() -> str:
-    """查找 go-ios 可执行文件路径，优先项目内 bin/ios/ios.exe。"""
-    # 项目根目录（backend/ 的上一级）
+    """查找 go-ios 可执行文件路径。
+
+    查找顺序：
+    1. MSCA_RESOURCES_PATH 环境变量（Electron 打包后传入）
+    2. 项目内 bin/ios/ios.exe（开发模式）
+    3. 系统 PATH
+    """
+    # Electron 打包后的资源路径
+    res_path = os.environ.get("MSCA_RESOURCES_PATH", "")
+    if res_path:
+        packaged_bin = os.path.join(res_path, "bin", "ios", "ios.exe")
+        if os.path.isfile(packaged_bin):
+            return packaged_bin
+
+    # 开发模式：项目根目录（backend/ 的上一级）
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     project_root = os.path.dirname(backend_dir)
     local_bin = os.path.join(project_root, "bin", "ios", "ios.exe")
     if os.path.isfile(local_bin):
         return local_bin
+
     # 系统 PATH
     system_bin = shutil.which("ios")
     if system_bin:

@@ -90,8 +90,16 @@ class BackendManager {
       args = ["run", "python", "__main__.py", "--host", "127.0.0.1", "--port", String(this._port)]
       opts = { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, cwd: path.join(__dirname, "..", "backend") }
     } else {
+      const resPath = process.resourcesPath || path.join(__dirname, "..")
       args = ["--port", String(this._port)]
-      opts = { stdio: ["ignore", "pipe", "pipe"], windowsHide: true }
+      opts = {
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+        env: {
+          ...process.env,
+          MSCA_RESOURCES_PATH: resPath,
+        },
+      }
     }
     this._process = spawn(cmd, args, opts)
     this._process.stdout.on("data", (d) => console.log(`[backend] ${d.toString().trim()}`))

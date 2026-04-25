@@ -46,6 +46,14 @@
       {
         "from": "resources/",
         "to": "resources/"
+      },
+      {
+        "from": "bin/android/",
+        "to": "bin/android/"
+      },
+      {
+        "from": "bin/ios/",
+        "to": "bin/ios/"
       }
     ],
     "electronDownload": {

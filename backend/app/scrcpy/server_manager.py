@@ -9,6 +9,7 @@
 
 import asyncio
 import logging
+import os
 import socket
 import struct
 import time
@@ -20,8 +21,24 @@ from app.scrcpy import protocol
 
 logger = logging.getLogger(__name__)
 
-# scrcpy-server 二进制文件路径（项目根目录 bin/android/scrcpy-server）
-SERVER_JAR_PATH = Path(__file__).resolve().parents[3] / "bin" / "android" / "scrcpy-server"
+
+def _find_scrcpy_server() -> Path:
+    """查找 scrcpy-server 路径。
+
+    查找顺序：
+    1. MSCA_RESOURCES_PATH 环境变量（Electron 打包后传入）
+    2. 项目内 bin/android/scrcpy-server（开发模式）
+    """
+    res_path = os.environ.get("MSCA_RESOURCES_PATH", "")
+    if res_path:
+        packaged = Path(res_path) / "bin" / "android" / "scrcpy-server"
+        if packaged.is_file():
+            return packaged
+    return Path(__file__).resolve().parents[3] / "bin" / "android" / "scrcpy-server"
+
+
+# scrcpy-server 二进制文件路径
+SERVER_JAR_PATH = _find_scrcpy_server()
 
 # 版本文件路径（与 scrcpy-server 同目录，更新 server 时同步更新）
 SERVER_VERSION_PATH = SERVER_JAR_PATH.parent / "scrcpy-server.version"
