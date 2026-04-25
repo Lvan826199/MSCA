@@ -1,8 +1,10 @@
 """控制指令 WebSocket 端点。
 
 接收前端 JSON 控制指令，编码为 scrcpy 二进制协议，写入 control_socket。
+同时轮询设备消息（剪贴板回传等），推送给前端。
 """
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -14,49 +16,80 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 设备消息轮询间隔（秒）
+DEVICE_MSG_POLL_INTERVAL = 0.5
+
 
 @router.websocket("/ws/control/{device_id}")
 async def control_websocket(websocket: WebSocket, device_id: str):
     """控制指令 WebSocket 端点。
 
-    接收 JSON 格式的控制指令：
-    - touch: { type: "touch", action: "down"|"up"|"move", x, y, width, height }
-    - key: { type: "key", action: "down"|"up", keycode }
-    - text: { type: "text", text: "..." }
-    - scroll: { type: "scroll", x, y, width, height, hScroll, vScroll }
-    - back: { type: "back" }
-    - home: { type: "home" }
-    - power: { type: "power" }
+    双向通信：
+    - 接收前端 JSON 控制指令 → 编码为 scrcpy 二进制 → 发送到设备
+    - 轮询设备消息（剪贴板回传等） → JSON 推送给前端
     """
     await websocket.accept()
     logger.info(f"[{device_id}] 控制 WS 已连接")
 
+    async def receive_commands():
+        """接收前端控制指令并转发到设备。"""
+        try:
+            while True:
+                data = await websocket.receive_json()
+                cmd_type = data.get("type", "")
+
+                try:
+                    driver = get_active_driver(device_id)
+                except Exception:
+                    await websocket.send_json({"error": "设备未在投屏中"})
+                    continue
+
+                manager = driver._server_manager
+                if not manager or not manager.running:
+                    await websocket.send_json({"error": "投屏会话未就绪"})
+                    continue
+
+                encoded = _encode_command(cmd_type, data, manager)
+                if encoded:
+                    await manager.send_control(encoded)
+                else:
+                    await websocket.send_json({"error": f"未知指令类型: {cmd_type}"})
+        except WebSocketDisconnect:
+            pass
+
+    async def poll_device_messages():
+        """轮询设备消息并推送给前端。"""
+        try:
+            while True:
+                try:
+                    driver = get_active_driver(device_id)
+                    manager = driver._server_manager
+                    if manager and manager.running:
+                        msg = await manager.read_device_message()
+                        if msg:
+                            await websocket.send_json({"device_msg": msg})
+                except Exception:
+                    pass
+                await asyncio.sleep(DEVICE_MSG_POLL_INTERVAL)
+        except asyncio.CancelledError:
+            pass
+
+    # 并发运行：接收指令 + 轮询设备消息
+    recv_task = asyncio.create_task(receive_commands())
+    poll_task = asyncio.create_task(poll_device_messages())
+
     try:
-        while True:
-            data = await websocket.receive_json()
-            cmd_type = data.get("type", "")
-
-            try:
-                driver = get_active_driver(device_id)
-            except Exception:
-                await websocket.send_json({"error": "设备未在投屏中"})
-                continue
-
-            manager = driver._server_manager
-            if not manager or not manager.running:
-                await websocket.send_json({"error": "投屏会话未就绪"})
-                continue
-
-            encoded = _encode_command(cmd_type, data, manager)
-            if encoded:
-                await manager.send_control(encoded)
-            else:
-                await websocket.send_json({"error": f"未知指令类型: {cmd_type}"})
-
-    except WebSocketDisconnect:
-        logger.info(f"[{device_id}] 控制 WS 已断开")
+        done, pending = await asyncio.wait(
+            [recv_task, poll_task], return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
     except Exception as e:
         logger.error(f"[{device_id}] 控制 WS 异常: {e}")
+        recv_task.cancel()
+        poll_task.cancel()
+
+    logger.info(f"[{device_id}] 控制 WS 已断开")
 
 
 def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:

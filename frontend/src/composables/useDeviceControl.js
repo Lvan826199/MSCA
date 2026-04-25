@@ -94,6 +94,10 @@ export function useDeviceControl(deviceId) {
         if (data.error) {
           error.value = data.error
         }
+        // 处理设备消息回传
+        if (data.device_msg) {
+          handleDeviceMessage(data.device_msg)
+        }
       } catch {
         /* binary or non-json, ignore */
       }
@@ -106,6 +110,16 @@ export function useDeviceControl(deviceId) {
       ws = null
     }
     connected.value = false
+  }
+
+  /**
+   * 处理设备消息回传（剪贴板等）
+   */
+  function handleDeviceMessage(msg) {
+    if (msg.type === "clipboard" && msg.text) {
+      // 将设备剪贴板内容写入浏览器剪贴板
+      navigator.clipboard.writeText(msg.text).catch(() => {})
+    }
   }
 
   function send(cmd) {

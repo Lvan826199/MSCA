@@ -32,18 +32,18 @@
 
     <DeviceControlBar
       v-if="mirroring"
-      @back="control.sendBack()"
-      @home="control.sendHome()"
-      @recents="sendRecents"
-      @volume-up="control.sendVolumeUp()"
-      @volume-down="control.sendVolumeDown()"
-      @power="control.sendPower()"
-      @expand-notification="control.sendExpandNotification()"
-      @expand-settings="control.sendExpandSettings()"
-      @collapse-panels="control.sendCollapsePanels()"
-      @rotate="control.sendRotate()"
-      @send-text="control.sendText($event)"
-      @clipboard="(text) => control.sendClipboard(text, true)"
+      @back="syncAction('sendBack')"
+      @home="syncAction('sendHome')"
+      @recents="syncAction('send', { type: 'key', action: 'down', keycode: 187 })"
+      @volume-up="syncAction('sendVolumeUp')"
+      @volume-down="syncAction('sendVolumeDown')"
+      @power="syncAction('sendPower')"
+      @expand-notification="syncAction('sendExpandNotification')"
+      @expand-settings="syncAction('sendExpandSettings')"
+      @collapse-panels="syncAction('sendCollapsePanels')"
+      @rotate="syncAction('sendRotate')"
+      @send-text="syncAction('sendText', $event)"
+      @clipboard="(text) => syncAction('sendClipboard', text, true)"
     />
   </div>
 </template>
@@ -58,6 +58,8 @@ import DeviceControlBar from "./DeviceControlBar.vue"
 
 const props = defineProps({
   deviceId: { type: String, required: true },
+  syncMode: { type: Boolean, default: false },
+  syncBroadcast: { type: Function, default: null },
 })
 
 const emit = defineEmits(["started", "stopped", "error"])
@@ -145,6 +147,17 @@ function sendRecents() {
   control.send({ type: "key", action: "down", keycode: 187 })
 }
 
+/**
+ * 执行控制操作并在同步模式下广播到其他面板
+ */
+function syncAction(method, ...args) {
+  const fn = control[method]
+  if (typeof fn === "function") fn(...args)
+  if (props.syncMode && props.syncBroadcast) {
+    props.syncBroadcast(props.deviceId, method, args)
+  }
+}
+
 // 视频尺寸就绪/变化后绑定或更新触控事件
 let controlBound = false
 watch([videoWidth, videoHeight], ([w, h]) => {
@@ -175,7 +188,7 @@ onUnmounted(() => {
   stopDecoder()
 })
 
-defineExpose({ startMirror, stopMirror, mirroring, deviceId: props.deviceId })
+defineExpose({ startMirror, stopMirror, mirroring, control, deviceId: props.deviceId })
 </script>
 
 <style scoped>

@@ -7,6 +7,25 @@
         <el-tag type="info" size="small" effect="dark">{{ devices.length }} 台设备</el-tag>
       </div>
       <div class="toolbar-right">
+        <el-switch
+          v-model="syncMode"
+          active-text="同步"
+          inactive-text=""
+          size="small"
+          style="margin-right: 8px;"
+        />
+        <el-select
+          v-model="gridColumns"
+          size="small"
+          style="width: 90px; margin-right: 8px;"
+          placeholder="列数"
+        >
+          <el-option label="自动" :value="0" />
+          <el-option label="1 列" :value="1" />
+          <el-option label="2 列" :value="2" />
+          <el-option label="3 列" :value="3" />
+          <el-option label="4 列" :value="4" />
+        </el-select>
         <el-button size="small" :icon="Plus" @click="openAddDevice">添加设备</el-button>
         <el-button
           v-if="devices.length > 0"
@@ -30,6 +49,8 @@
         v-for="id in devices"
         :key="id"
         :device-id="id"
+        :sync-mode="syncMode"
+        :sync-broadcast="broadcastControl"
         :ref="(el) => setPanelRef(id, el)"
         @stopped="onDeviceStopped"
       />
@@ -75,9 +96,12 @@ const panelRefs = ref({})
 const showAddDevice = ref(false)
 const selectedDevices = ref([])
 const allDevices = ref([])
+const syncMode = ref(false)
+const gridColumns = ref(0) // 0 = 自动
 
-// 根据设备数量计算网格 class
+// 根据设备数量或手动选择计算网格 class
 const gridClass = computed(() => {
+  if (gridColumns.value > 0) return `grid-manual-${gridColumns.value}`
   const count = devices.value.length
   if (count <= 1) return "grid-1"
   if (count <= 2) return "grid-2"
@@ -138,12 +162,37 @@ function onDeviceStopped(deviceId) {
   devices.value = devices.value.filter((id) => id !== deviceId)
 }
 
+/**
+ * 同步广播控制指令到所有投屏面板（排除发起者）
+ * @param {string} sourceDeviceId - 发起操作的设备 ID
+ * @param {string} method - 控制方法名（如 sendBack, sendHome 等）
+ * @param {Array} args - 方法参数
+ */
+function broadcastControl(sourceDeviceId, method, args = []) {
+  if (!syncMode.value) return
+  for (const [id, panel] of Object.entries(panelRefs.value)) {
+    if (id === sourceDeviceId || !panel?.control) continue
+    const fn = panel.control[method]
+    if (typeof fn === "function") {
+      fn(...args)
+    }
+  }
+}
+
 async function stopAll() {
+  // 前端先停止所有面板（断开 WS、停止解码）
   const panels = Object.values(panelRefs.value).filter((p) => p?.stopMirror)
-  // 每个 stop 加 3 秒超时，避免卡住
   const withTimeout = (fn) =>
     Promise.race([fn(), new Promise((resolve) => setTimeout(resolve, 3000))])
   await Promise.all(panels.map((p) => withTimeout(() => p.stopMirror()).catch(() => {})))
+
+  // 后端批量停止（确保 scrcpy 进程和端口转发释放）
+  try {
+    await fetch(`${getApiBase()}/api/mirror/stop-all`, { method: "POST" })
+  } catch {
+    /* ignore */
+  }
+
   devices.value = []
   panelRefs.value = {}
 }
@@ -238,5 +287,21 @@ onUnmounted(() => {
 .grid-9 {
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
+}
+
+.grid-manual-1 {
+  grid-template-columns: 1fr;
+}
+
+.grid-manual-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.grid-manual-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.grid-manual-4 {
+  grid-template-columns: repeat(4, 1fr);
 }
 </style>

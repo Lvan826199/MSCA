@@ -257,36 +257,42 @@ def encode_rotate_device() -> bytes:
     return struct.pack(">B", CONTROL_TYPE_ROTATE_DEVICE)
 
 
-def encode_expand_notification_panel() -> bytes:
-    """展开通知栏。"""
-    return struct.pack(">B", CONTROL_TYPE_EXPAND_NOTIFICATION_PANEL)
+# ─── 设备消息解析（scrcpy device → PC） ───
+
+# 设备消息类型
+DEVICE_MSG_TYPE_CLIPBOARD = 0
+DEVICE_MSG_TYPE_ACK_CLIPBOARD = 1
+DEVICE_MSG_TYPE_UHID_OUTPUT = 2
 
 
-def encode_expand_settings_panel() -> bytes:
-    """展开设置面板（快捷开关）。"""
-    return struct.pack(">B", CONTROL_TYPE_EXPAND_SETTINGS_PANEL)
+def parse_device_message(data: bytes) -> dict | None:
+    """解析 scrcpy 设备消息。
 
+    设备消息格式：
+    - TYPE_CLIPBOARD(0): type(1) + length(4) + text(length)
+    - TYPE_ACK_CLIPBOARD(1): type(1) + sequence(8)
 
-def encode_collapse_panels() -> bytes:
-    """收起通知栏/设置面板。"""
-    return struct.pack(">B", CONTROL_TYPE_COLLAPSE_PANELS)
-
-
-def encode_set_clipboard(text: str, paste: bool = False) -> bytes:
-    """设置设备剪贴板内容。
-
-    scrcpy v3 格式：type(1) + sequence(8) + paste(1) + length(4) + text
+    Returns:
+        解析后的消息字典，或 None（未知类型）
     """
-    text_bytes = text.encode("utf-8")
-    return struct.pack(
-        ">BqBI",
-        CONTROL_TYPE_SET_CLIPBOARD,
-        0,  # sequence
-        1 if paste else 0,
-        len(text_bytes),
-    ) + text_bytes
+    if not data:
+        return None
 
+    msg_type = data[0]
 
-def encode_rotate_device() -> bytes:
-    """旋转设备屏幕。"""
-    return struct.pack(">B", CONTROL_TYPE_ROTATE_DEVICE)
+    if msg_type == DEVICE_MSG_TYPE_CLIPBOARD:
+        if len(data) < 5:
+            return None
+        text_len = struct.unpack(">I", data[1:5])[0]
+        if len(data) < 5 + text_len:
+            return None
+        text = data[5 : 5 + text_len].decode("utf-8", errors="replace")
+        return {"type": "clipboard", "text": text}
+
+    if msg_type == DEVICE_MSG_TYPE_ACK_CLIPBOARD:
+        if len(data) < 9:
+            return None
+        sequence = struct.unpack(">q", data[1:9])[0]
+        return {"type": "ack_clipboard", "sequence": sequence}
+
+    return None

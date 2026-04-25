@@ -112,3 +112,23 @@ async def list_sessions():
                 "screen_height": h,
             })
     return {"sessions": sessions}
+
+
+@router.post("/mirror/stop-all")
+async def stop_all_mirrors():
+    """批量停止所有投屏会话，每个设备独立处理异常。"""
+    results = []
+    device_ids = list(_drivers.keys())
+    for device_id in device_ids:
+        driver = _drivers.get(device_id)
+        if not driver:
+            continue
+        try:
+            await driver.stop_mirroring()
+            results.append({"device_id": device_id, "status": "stopped"})
+        except Exception as e:
+            logger.error(f"停止投屏失败 [{device_id}]: {e}")
+            results.append({"device_id": device_id, "status": "error", "detail": str(e)})
+        finally:
+            _drivers.pop(device_id, None)
+    return {"results": results}

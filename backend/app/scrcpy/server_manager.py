@@ -16,6 +16,8 @@ from pathlib import Path
 
 import adbutils
 
+from app.scrcpy import protocol
+
 logger = logging.getLogger(__name__)
 
 # scrcpy-server 二进制文件路径（项目根目录 bin/android/scrcpy-server）
@@ -290,6 +292,29 @@ class ScrcpyServerManager:
             self._control_socket.setblocking(False)
         except Exception as e:
             logger.error(f"[{self.device_serial}] 发送控制指令失败: {e}")
+
+    async def read_device_message(self) -> dict | None:
+        """从 control socket 读取设备消息（非阻塞）。
+
+        scrcpy 设备消息通过 control socket 回传，格式：
+        - TYPE_CLIPBOARD(0): type(1) + length(4) + text
+        - TYPE_ACK_CLIPBOARD(1): type(1) + sequence(8)
+
+        Returns:
+            解析后的消息字典，或 None（无消息/解析失败）
+        """
+        if not self._control_socket:
+            return None
+        try:
+            # 非阻塞读取，先尝试读 1 字节类型
+            data = self._control_socket.recv(4096)
+            if not data:
+                return None
+            return protocol.parse_device_message(data)
+        except BlockingIOError:
+            return None
+        except Exception:
+            return None
 
     async def stop(self) -> None:
         """停止 scrcpy-server，释放所有资源。"""
