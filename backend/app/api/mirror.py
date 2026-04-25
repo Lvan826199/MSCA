@@ -52,6 +52,13 @@ class MirrorStartRequest(BaseModel):
     bitrate: int = 8_000_000
     max_size: int = 0
 
+    def validated(self) -> "MirrorStartRequest":
+        """校验参数范围。"""
+        self.max_fps = max(1, min(self.max_fps, 120))
+        self.bitrate = max(100_000, min(self.bitrate, 50_000_000))
+        self.max_size = max(0, min(self.max_size, 4096))
+        return self
+
 
 class MirrorStatusResponse(BaseModel):
     device_id: str
@@ -65,6 +72,7 @@ async def start_mirror(device_id: str, req: MirrorStartRequest | None = None):
     """启动设备投屏。"""
     if req is None:
         req = MirrorStartRequest()
+    req = req.validated()
 
     driver = get_driver(device_id)
     if driver.is_mirroring:

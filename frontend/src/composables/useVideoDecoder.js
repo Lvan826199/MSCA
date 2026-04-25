@@ -263,23 +263,18 @@ export function useVideoDecoder(deviceId) {
     const ctx = canvas.getContext("2d")
 
     const blob = new Blob([buffer], { type: "image/jpeg" })
-    const url = URL.createObjectURL(blob)
-    const img = new Image()
-
-    img.onload = () => {
-      if (canvas.width !== img.width || canvas.height !== img.height) {
-        canvas.width = img.width
-        canvas.height = img.height
-        videoWidth.value = img.width
-        videoHeight.value = img.height
+    createImageBitmap(blob).then((bmp) => {
+      if (!canvasRef.value) { bmp.close(); return }
+      if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+        canvas.width = bmp.width
+        canvas.height = bmp.height
+        videoWidth.value = bmp.width
+        videoHeight.value = bmp.height
       }
-      ctx.drawImage(img, 0, 0)
-      URL.revokeObjectURL(url)
+      ctx.drawImage(bmp, 0, 0)
+      bmp.close()
       frameCount++
-    }
-
-    img.onerror = () => URL.revokeObjectURL(url)
-    img.src = url
+    }).catch(() => {})
   }
 
   // ─── 解码器管理 ───

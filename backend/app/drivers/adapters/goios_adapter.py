@@ -100,6 +100,7 @@ class GoIOSAdapter(IOSAdapterBase):
             await asyncio.sleep(1)
             if self._wda_process.poll() is not None:
                 stderr = self._wda_process.stderr.read().decode() if self._wda_process.stderr else ""
+                await self.stop_wda()
                 raise RuntimeError(f"WDA 进程退出: {stderr}")
 
             self.wda_info = WDAInfo(host="127.0.0.1", port=port)
@@ -107,6 +108,7 @@ class GoIOSAdapter(IOSAdapterBase):
                 logger.info(f"[{self.udid}] WDA 就绪 @ {port} (go-ios)")
                 return self.wda_info
 
+        await self.stop_wda()
         raise TimeoutError(f"[{self.udid}] WDA 启动超时（30s）")
 
     async def stop_wda(self) -> None:

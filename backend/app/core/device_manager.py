@@ -77,7 +77,10 @@ class DeviceManager:
         return q
 
     def unsubscribe(self, q: asyncio.Queue):
-        self._subscribers.remove(q)
+        try:
+            self._subscribers.remove(q)
+        except ValueError:
+            pass
 
     def start(self):
         if self._poll_task is None:
@@ -258,7 +261,7 @@ class DeviceManager:
 
     async def _notify(self):
         data = [d.model_dump() for d in self._devices.values()]
-        for q in self._subscribers:
+        for q in list(self._subscribers):
             try:
                 q.put_nowait(data)
             except asyncio.QueueFull:

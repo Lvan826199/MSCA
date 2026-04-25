@@ -225,11 +225,14 @@ onMounted(() => {
   fetchDevices()
 })
 
+let _cleaning = false
+
 onUnmounted(() => {
-  // 组件卸载时停止所有投屏
+  if (_cleaning) return
+  _cleaning = true
   for (const panel of Object.values(panelRefs.value)) {
     if (panel?.stopMirror) {
-      panel.stopMirror()
+      panel.stopMirror().catch(() => {})
     }
   }
 })

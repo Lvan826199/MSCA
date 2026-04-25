@@ -67,6 +67,7 @@ export function useDeviceControl(deviceId) {
   let videoWidth = 0
   let videoHeight = 0
   let _onSyncEvent = null  // 同步事件回调
+  let _isSyncReceiving = false  // 防止同步接收时再次广播
 
   function connect() {
     if (ws) return
@@ -106,6 +107,8 @@ export function useDeviceControl(deviceId) {
   }
 
   function disconnect() {
+    if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
+    _pendingMove = null
     if (ws) {
       ws.close()
       ws = null
@@ -203,19 +206,24 @@ export function useDeviceControl(deviceId) {
   }
 
   let mouseDown = false
+  let _pendingMove = null
+  let _rafId = null
 
   function _emitSync(cmd) {
-    if (_onSyncEvent && videoWidth && videoHeight) {
-      // 归一化坐标（0~1），便于不同分辨率设备间同步
-      if (cmd.x !== undefined) {
-        _onSyncEvent({
-          ...cmd,
-          nx: cmd.x / videoWidth,
-          ny: cmd.y / videoHeight,
-        })
-      } else {
-        _onSyncEvent(cmd)
-      }
+    if (_isSyncReceiving || !_onSyncEvent || !videoWidth || !videoHeight) return
+    if (cmd.x !== undefined) {
+      _onSyncEvent({ ...cmd, nx: cmd.x / videoWidth, ny: cmd.y / videoHeight })
+    } else {
+      _onSyncEvent(cmd)
+    }
+  }
+
+  function _flushMove() {
+    _rafId = null
+    if (_pendingMove) {
+      send(_pendingMove)
+      _emitSync(_pendingMove)
+      _pendingMove = null
     }
   }
 
@@ -234,15 +242,16 @@ export function useDeviceControl(deviceId) {
     if (!mouseDown) return
     const pos = canvasToDevice(e.clientX, e.clientY)
     if (pos) {
-      const cmd = { type: "touch", action: "move", ...pos }
-      send(cmd)
-      _emitSync(cmd)
+      _pendingMove = { type: "touch", action: "move", ...pos }
+      if (!_rafId) _rafId = requestAnimationFrame(_flushMove)
     }
   }
 
   function onMouseUp(e) {
     if (!mouseDown) return
     mouseDown = false
+    if (_pendingMove) { send(_pendingMove); _emitSync(_pendingMove); _pendingMove = null }
+    if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
     const pos = canvasToDevice(e.clientX, e.clientY)
     if (pos) {
       const cmd = { type: "touch", action: "up", ...pos }
@@ -334,14 +343,19 @@ export function useDeviceControl(deviceId) {
    */
   function sendNormalizedTouch(evt) {
     if (!videoWidth || !videoHeight) return
-    send({
-      type: evt.type,
-      action: evt.action,
-      x: Math.round(evt.nx * videoWidth),
-      y: Math.round(evt.ny * videoHeight),
-      width: videoWidth,
-      height: videoHeight,
-    })
+    _isSyncReceiving = true
+    try {
+      send({
+        type: evt.type,
+        action: evt.action,
+        x: Math.round(evt.nx * videoWidth),
+        y: Math.round(evt.ny * videoHeight),
+        width: videoWidth,
+        height: videoHeight,
+      })
+    } finally {
+      _isSyncReceiving = false
+    }
   }
 
   /**
