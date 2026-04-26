@@ -139,7 +139,7 @@ function onMirror() {
 }
 
 const installAccept = computed(() => {
-  return props.device.platform === "android" ? ".apk,.apks" : ".ipa"
+  return props.device.platform === "android" ? ".apk,.apks,.aab" : ".ipa"
 })
 
 function triggerInstall() {

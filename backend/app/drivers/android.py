@@ -225,7 +225,7 @@ class AndroidDriver(AbstractDeviceDriver):
     async def install_app(
         self, file_path: str, callback: Callable[[str], None] | None = None
     ) -> InstallResult:
-        """安装 APK/APKS 到 Android 设备。"""
+        """安装 APK/APKS/AAB 到 Android 设备。"""
         ext = os.path.splitext(file_path)[1].lower()
 
         try:
@@ -233,10 +233,12 @@ class AndroidDriver(AbstractDeviceDriver):
                 return await self._install_apk(file_path, callback)
             elif ext == ".apks":
                 return await self._install_apks(file_path, callback)
+            elif ext == ".aab":
+                return await self._install_aab(file_path, callback)
             else:
                 return InstallResult(
                     success=False,
-                    message=f"不支持的文件格式: {ext}（支持 .apk, .apks）",
+                    message=f"不支持的文件格式: {ext}（支持 .apk, .apks, .aab）",
                 )
         except Exception as e:
             logger.error(f"[{self.device_serial}] 安装失败: {e}")
@@ -292,3 +294,88 @@ class AndroidDriver(AbstractDeviceDriver):
             else:
                 err = proc.stderr.strip() or proc.stdout.strip()
                 return InstallResult(success=False, message=f"安装失败: {err}")
+
+    @staticmethod
+    def _find_bundletool() -> str | None:
+        """查找 bundletool.jar 路径。优先级：bin/android/ > 环境变量 BUNDLETOOL_PATH。"""
+        # 项目内置路径
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        builtin = os.path.join(project_root, "bin", "android", "bundletool.jar")
+        if os.path.isfile(builtin):
+            return builtin
+
+        # 环境变量
+        env_path = os.environ.get("BUNDLETOOL_PATH")
+        if env_path and os.path.isfile(env_path):
+            return env_path
+
+        return None
+
+    async def _install_aab(
+        self, file_path: str, callback: Callable[[str], None] | None
+    ) -> InstallResult:
+        """安装 AAB 文件：通过 bundletool 转换为 APKS 后安装到设备。"""
+        def _progress(msg: str):
+            if callback:
+                callback(msg)
+
+        bundletool = self._find_bundletool()
+        if not bundletool:
+            return InstallResult(
+                success=False,
+                message="未找到 bundletool.jar，请将其放置到 bin/android/bundletool.jar 或设置 BUNDLETOOL_PATH 环境变量",
+            )
+
+        # 检查 Java 是否可用
+        try:
+            await asyncio.to_thread(
+                subprocess.run, ["java", "-version"],
+                capture_output=True, timeout=10,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return InstallResult(
+                success=False,
+                message="未找到 Java 运行时，bundletool 需要 Java 11+ 才能运行",
+            )
+
+        _progress("正在通过 bundletool 将 AAB 转换为 APKS...")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            apks_path = os.path.join(tmpdir, "output.apks")
+
+            # bundletool build-apks: AAB → APKS
+            build_cmd = [
+                "java", "-jar", bundletool,
+                "build-apks",
+                "--bundle", file_path,
+                "--output", apks_path,
+                "--connected-device",
+                "--device-id", self.device_serial,
+            ]
+            proc = await asyncio.to_thread(
+                subprocess.run, build_cmd,
+                capture_output=True, text=True, timeout=300,
+            )
+            if proc.returncode != 0:
+                err = proc.stderr.strip() or proc.stdout.strip()
+                return InstallResult(success=False, message=f"AAB 转换失败: {err}")
+
+            _progress("转换完成，正在安装到设备...")
+
+            # bundletool install-apks: 安装到设备
+            install_cmd = [
+                "java", "-jar", bundletool,
+                "install-apks",
+                "--apks", apks_path,
+                "--device-id", self.device_serial,
+            ]
+            proc = await asyncio.to_thread(
+                subprocess.run, install_cmd,
+                capture_output=True, text=True, timeout=120,
+            )
+            if proc.returncode != 0:
+                err = proc.stderr.strip() or proc.stdout.strip()
+                return InstallResult(success=False, message=f"AAB 安装失败: {err}")
+
+            _progress("安装完成")
+            return InstallResult(success=True, message="AAB 安装成功")

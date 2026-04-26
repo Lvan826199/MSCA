@@ -1,4 +1,4 @@
-"""应用安装 API — 支持 APK/APKS/IPA 文件上传安装到设备。"""
+"""应用安装 API — 支持 APK/APKS/AAB/IPA 文件上传安装到设备。"""
 
 import logging
 import os
@@ -15,16 +15,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 允许的文件扩展名
-ALLOWED_EXTENSIONS = {".apk", ".apks", ".ipa"}
-# 最大文件大小 500MB
-MAX_FILE_SIZE = 500 * 1024 * 1024
+ALLOWED_EXTENSIONS = {".apk", ".apks", ".aab", ".ipa"}
+# 不限制文件大小（安装包可能很大）
+MAX_FILE_SIZE = None
 
 
 @router.post("/install/{device_id}")
 async def install_app(device_id: str, file: UploadFile = File(...)):
     """上传并安装应用到指定设备。
 
-    - Android: 支持 .apk, .apks
+    - Android: 支持 .apk, .apks, .aab
     - iOS: 支持 .ipa
     """
     dm = device_manager
@@ -42,8 +42,8 @@ async def install_app(device_id: str, file: UploadFile = File(...)):
         )
 
     # 校验平台与文件格式匹配
-    if device.platform == "android" and ext not in {".apk", ".apks"}:
-        raise HTTPException(status_code=400, detail="Android 设备仅支持 .apk/.apks 文件")
+    if device.platform == "android" and ext not in {".apk", ".apks", ".aab"}:
+        raise HTTPException(status_code=400, detail="Android 设备仅支持 .apk/.apks/.aab 文件")
     if device.platform == "ios" and ext != ".ipa":
         raise HTTPException(status_code=400, detail="iOS 设备仅支持 .ipa 文件")
 
@@ -52,12 +52,7 @@ async def install_app(device_id: str, file: UploadFile = File(...)):
         with tempfile.NamedTemporaryFile(
             delete=False, suffix=ext, prefix="msca_install_"
         ) as tmp:
-            total = 0
             while chunk := await file.read(1024 * 1024):
-                total += len(chunk)
-                if total > MAX_FILE_SIZE:
-                    os.unlink(tmp.name)
-                    raise HTTPException(status_code=413, detail="文件过大（最大 500MB）")
                 tmp.write(chunk)
             tmp_path = tmp.name
     except HTTPException:
