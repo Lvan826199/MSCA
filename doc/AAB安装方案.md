@@ -12,10 +12,11 @@ AAB 是 Google Play 的标准发布格式，不能直接安装到设备。安装
 
 ### 1. bundletool.jar
 
-- 下载地址：https://github.com/niclas-niclas/bundletool/releases
+- 下载地址：https://github.com/google/bundletool/releases
 - 下载最新版本的 `bundletool-all-x.x.x.jar`
 - 重命名为 `bundletool.jar`
 - 放置到项目目录：`bin/android/bundletool.jar`
+- 当前版本：1.18.3
 
 ### 2. Java 运行时 (JRE/JDK 11+)
 
@@ -32,8 +33,16 @@ bin/
 └── android/
     ├── scrcpy-server          # 已有
     ├── scrcpy-server.version  # 已有
-    └── bundletool.jar         # ← 新增，你需要放置到这里
+    ├── bundletool.jar         # AAB 转换工具
+    └── aab_keys/              # 签名密钥目录
+        ├── avidly.keystore
+        ├── avidly_signature
+        ├── debug.keystore
+        ├── hugewin.keystore
+        └── new_avidly_signer.keystore
 ```
+
+> **注意**：`aab_keys/` 下的 keystore 和签名文件已在 `.gitignore` 中排除，不会提交到远程仓库。
 
 ## 查找优先级
 
@@ -44,11 +53,29 @@ bin/
 
 ## 使用方式
 
-放置好 `bundletool.jar` 后，在设备卡片点击"安装应用"时即可选择 `.aab` 文件，后端会自动调用 bundletool 完成转换和安装。
+放置好 `bundletool.jar` 后，在设备卡片点击"安装应用"时即可选择 `.aab` 文件。
+
+### 签名配置
+
+选择 `.aab` 文件后，会弹出签名配置对话框：
+
+- **不选择签名**：使用 debug 签名（适用于开发/测试场景）
+- **选择签名密钥**：从 `bin/android/aab_keys/` 目录自动扫描可用的 keystore 文件，用户需填写对应的密码和 alias
+
+签名密钥文件放置到 `bin/android/aab_keys/` 目录即可被自动识别。
+
+### API 接口
+
+- `GET /api/install/keystores` — 列出可用的签名密钥文件
+- `POST /api/install/{device_id}` — 安装应用，AAB 安装时支持额外的签名表单字段：
+  - `keystore`：keystore 文件路径
+  - `ks_pass`：keystore 密码
+  - `key_alias`：key alias
+  - `key_pass`：key 密码
 
 ## 注意事项
 
 - AAB 转换过程会根据连接设备的 ABI、屏幕密度、语言等生成专属 APK，因此必须在设备连接状态下操作
 - 转换过程可能需要 10-30 秒，取决于 AAB 大小
-- 如果 AAB 使用了 Play App Signing，需要提供签名密钥（当前实现使用 debug 签名，适用于开发/测试场景）
-- 生产签名的 AAB 如需安装，可能需要额外的 `--ks`（keystore）参数，后续可按需扩展
+- keystore 文件和 avidly_signature 禁止提交到远程仓库（已配置 .gitignore）
+- 签名密钥的密码等敏感信息仅在安装时通过表单传递，不做持久化存储

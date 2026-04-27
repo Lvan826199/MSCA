@@ -223,7 +223,13 @@ class AndroidDriver(AbstractDeviceDriver):
         return None
 
     async def install_app(
-        self, file_path: str, callback: Callable[[str], None] | None = None
+        self,
+        file_path: str,
+        callback: Callable[[str], None] | None = None,
+        keystore: str | None = None,
+        ks_pass: str | None = None,
+        key_alias: str | None = None,
+        key_pass: str | None = None,
     ) -> InstallResult:
         """安装 APK/APKS/AAB 到 Android 设备。"""
         ext = os.path.splitext(file_path)[1].lower()
@@ -234,7 +240,11 @@ class AndroidDriver(AbstractDeviceDriver):
             elif ext == ".apks":
                 return await self._install_apks(file_path, callback)
             elif ext == ".aab":
-                return await self._install_aab(file_path, callback)
+                return await self._install_aab(
+                    file_path, callback,
+                    keystore=keystore, ks_pass=ks_pass,
+                    key_alias=key_alias, key_pass=key_pass,
+                )
             else:
                 return InstallResult(
                     success=False,
@@ -296,10 +306,15 @@ class AndroidDriver(AbstractDeviceDriver):
                 return InstallResult(success=False, message=f"安装失败: {err}")
 
     @staticmethod
+    def _get_project_root() -> str:
+        """获取项目根目录。"""
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+    @staticmethod
     def _find_bundletool() -> str | None:
         """查找 bundletool.jar 路径。优先级：bin/android/ > 环境变量 BUNDLETOOL_PATH。"""
         # 项目内置路径
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        project_root = AndroidDriver._get_project_root()
         builtin = os.path.join(project_root, "bin", "android", "bundletool.jar")
         if os.path.isfile(builtin):
             return builtin
@@ -311,10 +326,45 @@ class AndroidDriver(AbstractDeviceDriver):
 
         return None
 
+    @staticmethod
+    def list_keystores() -> list[dict]:
+        """列出 bin/android/aab_keys/ 下可用的签名文件。
+
+        返回格式: [{"name": "xxx.keystore", "path": "绝对路径"}, ...]
+        """
+        keys_dir = os.path.join(
+            AndroidDriver._get_project_root(), "bin", "android", "aab_keys"
+        )
+        if not os.path.isdir(keys_dir):
+            return []
+
+        result = []
+        for fname in sorted(os.listdir(keys_dir)):
+            fpath = os.path.join(keys_dir, fname)
+            if not os.path.isfile(fpath):
+                continue
+            # 匹配 .keystore 文件和无扩展名的签名文件
+            _, ext = os.path.splitext(fname)
+            if ext == ".keystore":
+                result.append({"name": fname, "path": fpath})
+            elif ext == "" and "." not in fname:
+                # 无扩展名文件视为签名文件（如 avidly_signature）
+                result.append({"name": fname, "path": fpath})
+        return result
+
     async def _install_aab(
-        self, file_path: str, callback: Callable[[str], None] | None
+        self,
+        file_path: str,
+        callback: Callable[[str], None] | None,
+        keystore: str | None = None,
+        ks_pass: str | None = None,
+        key_alias: str | None = None,
+        key_pass: str | None = None,
     ) -> InstallResult:
-        """安装 AAB 文件：通过 bundletool 转换为 APKS 后安装到设备。"""
+        """安装 AAB 文件：通过 bundletool 转换为 APKS 后安装到设备。
+
+        签名参数均为可选，不传则使用 debug 签名。
+        """
         def _progress(msg: str):
             if callback:
                 callback(msg)
@@ -351,7 +401,18 @@ class AndroidDriver(AbstractDeviceDriver):
                 "--output", apks_path,
                 "--connected-device",
                 "--device-id", self.device_serial,
+                "--overwrite",
             ]
+
+            # 附加签名参数
+            if keystore:
+                build_cmd += [
+                    f"--ks={keystore}",
+                    f"--ks-pass=pass:{ks_pass or ''}",
+                    f"--ks-key-alias={key_alias or ''}",
+                    f"--key-pass=pass:{key_pass or ''}",
+                ]
+
             proc = await asyncio.to_thread(
                 subprocess.run, build_cmd,
                 capture_output=True, text=True, timeout=300,

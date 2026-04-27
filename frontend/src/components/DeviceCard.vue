@@ -70,6 +70,47 @@
         @change="onFileSelected"
       />
     </div>
+
+    <!-- AAB 签名配置对话框 -->
+    <el-dialog
+      v-model="showKeystoreDialog"
+      title="AAB 签名配置"
+      width="420px"
+      :close-on-click-modal="false"
+    >
+      <el-form label-position="top" size="default">
+        <el-form-item label="签名密钥（可选，不选则使用 debug 签名）">
+          <el-select
+            v-model="selectedKeystore"
+            placeholder="不使用签名"
+            clearable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="ks in keystoreList"
+              :key="ks.name"
+              :label="ks.name"
+              :value="ks.path"
+            />
+          </el-select>
+        </el-form-item>
+        <template v-if="selectedKeystore">
+          <el-form-item label="Keystore 密码">
+            <el-input v-model="ksPass" type="password" show-password placeholder="请输入 keystore 密码" />
+          </el-form-item>
+          <el-form-item label="Key Alias">
+            <el-input v-model="keyAlias" placeholder="请输入 key alias" />
+          </el-form-item>
+          <el-form-item label="Key 密码">
+            <el-input v-model="keyPass" type="password" show-password placeholder="请输入 key 密码" />
+          </el-form-item>
+        </template>
+      </el-form>
+      <template #footer>
+        <el-button @click="showKeystoreDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmAabInstall">确认安装</el-button>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -92,6 +133,15 @@ const editingAlias = ref(false)
 const aliasInput = ref("")
 const installing = ref(false)
 const fileInput = ref(null)
+
+// AAB 签名相关
+const showKeystoreDialog = ref(false)
+const keystoreList = ref([])
+const selectedKeystore = ref("")
+const ksPass = ref("")
+const keyAlias = ref("")
+const keyPass = ref("")
+const pendingAabFile = ref(null)
 
 const displayName = computed(() => {
   const alias = getDeviceAlias(props.device.id)
@@ -152,10 +202,63 @@ async function onFileSelected(e) {
   // 重置 input 以便重复选择同一文件
   e.target.value = ""
 
+  // AAB 文件弹出签名配置对话框
+  if (file.name.toLowerCase().endsWith(".aab")) {
+    pendingAabFile.value = file
+    await fetchKeystores()
+    showKeystoreDialog.value = true
+    return
+  }
+
+  await doInstall(file)
+}
+
+async function fetchKeystores() {
+  try {
+    const base = getBackendUrl()
+    const res = await fetch(`${base}/api/install/keystores`)
+    const data = await res.json()
+    keystoreList.value = data.keystores || []
+  } catch {
+    keystoreList.value = []
+  }
+}
+
+async function confirmAabInstall() {
+  showKeystoreDialog.value = false
+  const file = pendingAabFile.value
+  pendingAabFile.value = null
+  if (!file) return
+
+  const signingOpts = selectedKeystore.value
+    ? {
+        keystore: selectedKeystore.value,
+        ks_pass: ksPass.value,
+        key_alias: keyAlias.value,
+        key_pass: keyPass.value,
+      }
+    : null
+  await doInstall(file, signingOpts)
+
+  // 重置签名表单
+  selectedKeystore.value = ""
+  ksPass.value = ""
+  keyAlias.value = ""
+  keyPass.value = ""
+}
+
+async function doInstall(file, signingOpts = null) {
   installing.value = true
   try {
     const formData = new FormData()
     formData.append("file", file)
+
+    if (signingOpts) {
+      if (signingOpts.keystore) formData.append("keystore", signingOpts.keystore)
+      if (signingOpts.ks_pass) formData.append("ks_pass", signingOpts.ks_pass)
+      if (signingOpts.key_alias) formData.append("key_alias", signingOpts.key_alias)
+      if (signingOpts.key_pass) formData.append("key_pass", signingOpts.key_pass)
+    }
 
     const base = getBackendUrl()
     const res = await fetch(`${base}/api/install/${props.device.id}`, {

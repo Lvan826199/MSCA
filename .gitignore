@@ -54,3 +54,8 @@ logs/
 
 # Backend port file (auto-generated)
 .backend-port
+
+# AAB signing keys (禁止提交到远程仓库)
+bin/android/aab_keys/*.keystore
+bin/android/aab_keys/avidly_signature
+bin/android/aab_keys/install_aab.bat

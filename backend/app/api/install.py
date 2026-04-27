@@ -4,7 +4,7 @@ import logging
 import os
 import tempfile
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.core.device_manager import device_manager
 from app.drivers.android import AndroidDriver
@@ -20,8 +20,21 @@ ALLOWED_EXTENSIONS = {".apk", ".apks", ".aab", ".ipa"}
 MAX_FILE_SIZE = None
 
 
+@router.get("/install/keystores")
+async def list_keystores():
+    """列出可用的 AAB 签名密钥文件。"""
+    return {"keystores": AndroidDriver.list_keystores()}
+
+
 @router.post("/install/{device_id}")
-async def install_app(device_id: str, file: UploadFile = File(...)):
+async def install_app(
+    device_id: str,
+    file: UploadFile = File(...),
+    keystore: str | None = Form(None),
+    ks_pass: str | None = Form(None),
+    key_alias: str | None = Form(None),
+    key_pass: str | None = Form(None),
+):
     """上传并安装应用到指定设备。
 
     - Android: 支持 .apk, .apks, .aab
@@ -70,7 +83,11 @@ async def install_app(device_id: str, file: UploadFile = File(...)):
 
         if device.platform == "android":
             driver = AndroidDriver(device_serial=device_id)
-            result = await driver.install_app(tmp_path, callback=on_progress)
+            result = await driver.install_app(
+                tmp_path, callback=on_progress,
+                keystore=keystore, ks_pass=ks_pass,
+                key_alias=key_alias, key_pass=key_pass,
+            )
         elif device.platform == "ios":
             adapter = dm.create_ios_adapter(device_id)
             driver = IOSDriver(device_id=device_id, adapter=adapter)
