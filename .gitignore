@@ -59,3 +59,6 @@ logs/
 bin/android/aab_keys/*.keystore
 bin/android/aab_keys/avidly_signature
 bin/android/aab_keys/install_aab.bat
+
+# iOS 配对凭证（敏感信息，禁止提交）
+backend/selfIdentity.plist
