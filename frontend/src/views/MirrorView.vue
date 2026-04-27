@@ -87,18 +87,24 @@ import { useRoute, useRouter } from "vue-router"
 import { ArrowLeft, Plus } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
 import { useSettings } from "@/composables/useSettings"
+import { useDevices } from "@/composables/useDevices"
 import DeviceMirrorPanel from "@/components/DeviceMirrorPanel.vue"
 
 const route = useRoute()
 const router = useRouter()
 const { settings: appSettings } = useSettings()
+const {
+  devices: globalDevices,
+  connect: connectDeviceWs,
+  disconnect: disconnectDeviceWs,
+  fetchDevices,
+} = useDevices()
 
 // 当前投屏设备列表
 const devices = ref([])
 const panelRefs = ref({})
 const showAddDevice = ref(false)
 const selectedDevices = ref([])
-const allDevices = ref([])
 const syncMode = ref(false)
 const gridColumns = ref(appSettings.value.layout.gridColumns)
 
@@ -120,7 +126,7 @@ const gridClass = computed(() => {
 
 // 可添加的设备（在线且未在投屏中）
 const availableDevices = computed(() =>
-  allDevices.value.filter(
+  globalDevices.value.filter(
     (d) => d.status === "online" && !devices.value.includes(d.id)
   )
 )
@@ -134,7 +140,7 @@ function setPanelRef(id, el) {
 }
 
 function getDeviceName(deviceId) {
-  const dev = allDevices.value.find((d) => d.id === deviceId)
+  const dev = globalDevices.value.find((d) => d.id === deviceId)
   if (!dev) return ""
   if (dev.alias) {
     const model = dev.model || dev.id
@@ -146,18 +152,6 @@ function getDeviceName(deviceId) {
 function getApiBase() {
   const { getBackendUrl } = useConnection()
   return getBackendUrl()
-}
-
-async function fetchDevices() {
-  try {
-    const res = await fetch(`${getApiBase()}/api/devices`)
-    if (res.ok) {
-      const data = await res.json()
-      allDevices.value = data.devices || data || []
-    }
-  } catch {
-    /* ignore */
-  }
 }
 
 async function openAddDevice() {
@@ -221,13 +215,16 @@ async function goBack() {
 }
 
 onMounted(() => {
+  // 订阅全局设备列表 WebSocket
+  connectDeviceWs()
+  fetchDevices()
+
   // 从 URL query 获取初始设备
   const deviceParam = route.query.device
   if (deviceParam) {
     const ids = Array.isArray(deviceParam) ? deviceParam : [deviceParam]
     devices.value = ids.filter(Boolean)
   }
-  fetchDevices()
 })
 
 let _cleaning = false
@@ -235,6 +232,7 @@ let _cleaning = false
 onUnmounted(() => {
   if (_cleaning) return
   _cleaning = true
+  disconnectDeviceWs()
   for (const panel of Object.values(panelRefs.value)) {
     if (panel?.stopMirror) {
       panel.stopMirror().catch(() => {})

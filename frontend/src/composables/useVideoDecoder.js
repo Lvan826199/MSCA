@@ -28,6 +28,7 @@ export function useVideoDecoder(deviceId) {
   let hasDescription = false
   let timestampCounter = 0
   let codecMode = "h264" // "h264" | "mjpeg"
+  let lastSpsData = null // 缓存上次的 SPS，用于检测旋转
 
   // ─── NAL 解析工具 ───
 
@@ -201,6 +202,28 @@ export function useVideoDecoder(deviceId) {
     } catch { /* ignore */ }
   }
 
+  /**
+   * 提取帧中的 SPS NAL 数据（用于检测配置变化）
+   */
+  function extractSps(data) {
+    const units = parseNalUnits(data)
+    for (const u of units) {
+      if (u.nalType === 7) return data.slice(u.offset, u.end)
+    }
+    return null
+  }
+
+  /**
+   * 比较两个 Uint8Array 是否相同
+   */
+  function arraysEqual(a, b) {
+    if (!a || !b || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false
+    }
+    return true
+  }
+
   function handleBinaryFrame(buffer) {
     if (codecMode === "mjpeg") {
       handleMjpegFrame(buffer)
@@ -212,6 +235,18 @@ export function useVideoDecoder(deviceId) {
 
     const isKey = view[0] === 0x01
     const h264Data = view.slice(1)
+
+    // 关键帧：检测 SPS 是否变化（屏幕旋转会导致 SPS 改变）
+    if (isKey) {
+      const newSps = extractSps(h264Data)
+      if (newSps) {
+        if (decoder && lastSpsData && !arraysEqual(newSps, lastSpsData)) {
+          // SPS 变化（旋转），重置 decoder 让它用新配置重新初始化
+          resetDecoder()
+        }
+        lastSpsData = newSps
+      }
+    }
 
     // 首个关键帧用于初始化解码器
     if (isKey && !decoder) {
@@ -329,6 +364,7 @@ export function useVideoDecoder(deviceId) {
       decoder = null
     }
     hasDescription = false
+    lastSpsData = null
   }
 
   function startFpsCounter() {

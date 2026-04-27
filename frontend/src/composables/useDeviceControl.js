@@ -191,6 +191,11 @@ export function useDeviceControl(deviceId) {
   }
 
   function unbindCanvas() {
+    if (_documentMouseUpHandler) {
+      document.removeEventListener("mouseup", _documentMouseUpHandler)
+      _documentMouseUpHandler = null
+    }
+    mouseDown = false
     if (!canvasEl) return
     canvasEl.removeEventListener("mousedown", onMouseDown)
     canvasEl.removeEventListener("mousemove", onMouseMove)
@@ -208,6 +213,7 @@ export function useDeviceControl(deviceId) {
   let mouseDown = false
   let _pendingMove = null
   let _rafId = null
+  let _documentMouseUpHandler = null
 
   function _emitSync(cmd) {
     if (_isSyncReceiving || !_onSyncEvent || !videoWidth || !videoHeight) return
@@ -236,6 +242,12 @@ export function useDeviceControl(deviceId) {
       send(cmd)
       _emitSync(cmd)
     }
+    // 在 document 上监听 mouseup，防止鼠标滑出 canvas 后丢失 up 事件
+    if (_documentMouseUpHandler) {
+      document.removeEventListener("mouseup", _documentMouseUpHandler)
+    }
+    _documentMouseUpHandler = onMouseUp
+    document.addEventListener("mouseup", _documentMouseUpHandler)
   }
 
   function onMouseMove(e) {
@@ -250,6 +262,11 @@ export function useDeviceControl(deviceId) {
   function onMouseUp(e) {
     if (!mouseDown) return
     mouseDown = false
+    // 移除 document 级别的 mouseup 监听
+    if (_documentMouseUpHandler) {
+      document.removeEventListener("mouseup", _documentMouseUpHandler)
+      _documentMouseUpHandler = null
+    }
     if (_pendingMove) { send(_pendingMove); _emitSync(_pendingMove); _pendingMove = null }
     if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
     const pos = canvasToDevice(e.clientX, e.clientY)

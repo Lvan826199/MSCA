@@ -54,6 +54,7 @@ import { Close, Loading } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
 import { useVideoDecoder } from "@/composables/useVideoDecoder"
 import { useDeviceControl } from "@/composables/useDeviceControl"
+import { useSettings } from "@/composables/useSettings"
 import DeviceControlBar from "./DeviceControlBar.vue"
 
 const props = defineProps({
@@ -129,7 +130,14 @@ async function startMirror() {
     // 启动控制连接
     control.connect()
 
+    // 等待 canvas 渲染就绪（v-else 条件切换需要 DOM 更新）
     await nextTick()
+    // canvas 可能还未挂载（Vue 条件渲染延迟），重试几次
+    let retries = 0
+    while (!canvasEl.value && retries < 5) {
+      await new Promise((r) => setTimeout(r, 50))
+      retries++
+    }
     if (canvasEl.value) {
       startDecoder(canvasEl.value)
     }
