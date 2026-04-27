@@ -60,7 +60,7 @@ class TideviceAdapter(IOSAdapterBase):
             if proc.returncode == 0:
                 logger.info(f"[{self.udid}] WDA 安装成功")
                 return True
-            logger.error(f"[{self.udid}] WDA 安装失败: {stderr.decode()}")
+            logger.error(f"[{self.udid}] WDA 安装失败: {stderr.decode(errors='replace')}")
             return False
         except Exception as e:
             logger.error(f"[{self.udid}] WDA 安装异常: {e}")
@@ -81,7 +81,7 @@ class TideviceAdapter(IOSAdapterBase):
         for i in range(30):
             await asyncio.sleep(1)
             if self._proxy_process.poll() is not None:
-                stderr = self._proxy_process.stderr.read().decode() if self._proxy_process.stderr else ""
+                stderr = self._proxy_process.stderr.read().decode(errors='replace') if self._proxy_process.stderr else ""
                 raise RuntimeError(f"WDA 代理进程退出: {stderr}")
 
             self.wda_info = WDAInfo(host="127.0.0.1", port=port)

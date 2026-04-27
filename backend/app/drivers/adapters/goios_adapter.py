@@ -32,8 +32,8 @@ class GoIOSAdapter(IOSAdapterBase):
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         if proc.returncode != 0:
-            raise RuntimeError(f"go-ios 命令失败: {' '.join(cmd)}\n{stderr.decode()}")
-        return stdout.decode()
+            raise RuntimeError(f"go-ios 命令失败: {' '.join(cmd)}\n{stderr.decode(errors='replace')}")
+        return stdout.decode(errors='replace')
 
     async def list_devices(self) -> list[dict]:
         """通过 go-ios 列出已连接的 iOS 设备。"""
@@ -99,7 +99,7 @@ class GoIOSAdapter(IOSAdapterBase):
         for i in range(30):
             await asyncio.sleep(1)
             if self._wda_process.poll() is not None:
-                stderr = self._wda_process.stderr.read().decode() if self._wda_process.stderr else ""
+                stderr = self._wda_process.stderr.read().decode(errors='replace') if self._wda_process.stderr else ""
                 await self.stop_wda()
                 raise RuntimeError(f"WDA 进程退出: {stderr}")
 

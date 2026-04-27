@@ -66,6 +66,8 @@ class DeviceManager:
         self._tidevice_available = False
         self._goios_available = False
         self._goios_bin = ""
+        # 缓存已知 ADB 设备的属性（model, version, resolution），避免每次轮询都执行 shell 命令
+        self._adb_device_cache: dict[str, dict] = {}
 
     @property
     def devices(self) -> list[DeviceInfo]:
@@ -154,23 +156,44 @@ class DeviceManager:
     def _get_adb_devices(self) -> list[DeviceInfo]:
         devices = []
         try:
+            current_serials = set()
             for d in adbutils.adb.device_list():
-                try:
-                    model = d.prop.model or ""
-                    version = d.prop.get("ro.build.version.release", "")
-                    size = d.shell("wm size").strip()
-                    resolution = size.split(": ")[-1] if ": " in size else ""
-                except Exception:
-                    model, version, resolution = "", "", ""
+                serial = d.serial
+                current_serials.add(serial)
+
+                # 使用缓存的属性，避免投屏期间频繁执行 ADB shell 命令
+                cached = self._adb_device_cache.get(serial)
+                if cached:
+                    model = cached["model"]
+                    version = cached["version"]
+                    resolution = cached["resolution"]
+                else:
+                    try:
+                        model = d.prop.model or ""
+                        version = d.prop.get("ro.build.version.release", "")
+                        size = d.shell("wm size").strip()
+                        resolution = size.split(": ")[-1] if ": " in size else ""
+                    except Exception:
+                        model, version, resolution = "", "", ""
+                    self._adb_device_cache[serial] = {
+                        "model": model,
+                        "version": version,
+                        "resolution": resolution,
+                    }
 
                 devices.append(DeviceInfo(
-                    id=d.serial,
+                    id=serial,
                     platform="android",
                     model=model,
                     version=version,
                     resolution=resolution,
                     status="online",
                 ))
+
+            # 清理已断开设备的缓存
+            for stale in set(self._adb_device_cache) - current_serials:
+                del self._adb_device_cache[stale]
+
         except Exception as e:
             logger.error(f"ADB 设备列表获取失败: {e}")
         return devices

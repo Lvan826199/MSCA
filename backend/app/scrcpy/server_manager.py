@@ -297,16 +297,19 @@ class ScrcpyServerManager:
 
     async def send_control(self, data: bytes) -> None:
         """向 control socket 发送控制指令。"""
-        if not self._control_socket:
+        sock = self._control_socket
+        if not sock:
             return
         try:
             # control socket 是非阻塞的，临时切为阻塞发送
-            self._control_socket.setblocking(True)
-            self._control_socket.settimeout(2)
+            sock.setblocking(True)
+            sock.settimeout(2)
             await asyncio.get_event_loop().run_in_executor(
-                None, self._control_socket.sendall, data
+                None, sock.sendall, data
             )
-            self._control_socket.setblocking(False)
+            sock.setblocking(False)
+        except OSError:
+            pass  # socket 已关闭，静默忽略
         except Exception as e:
             logger.error(f"[{self.device_serial}] 发送控制指令失败: {e}")
 
