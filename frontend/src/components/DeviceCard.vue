@@ -3,22 +3,7 @@
     <div class="device-header">
       <div class="device-status">
         <span class="status-dot" :class="statusClass" />
-        <span
-          v-if="!editingAlias"
-          class="device-model"
-          @dblclick="startEditAlias"
-          :title="'双击编辑别名'"
-        >{{ displayName }}</span>
-        <el-input
-          v-else
-          v-model="aliasInput"
-          size="small"
-          style="width: 140px;"
-          @blur="saveAlias"
-          @keyup.enter="saveAlias"
-          @keyup.escape="cancelEditAlias"
-          autofocus
-        />
+        <span class="device-model" :title="displayName">{{ displayName }}</span>
       </div>
       <div class="platform-badge" :class="platformBadgeClass">
         <span class="platform-name">{{ device.platform === 'android' ? 'Android' : 'iOS' }}</span>
@@ -125,7 +110,6 @@
 import { computed, ref } from "vue"
 import { useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
-import { useSettings } from "@/composables/useSettings"
 import { useConnection } from "@/composables/useConnection"
 
 const props = defineProps({
@@ -133,11 +117,8 @@ const props = defineProps({
 })
 
 const router = useRouter()
-const { getDeviceAlias, setDeviceAlias } = useSettings()
 const { getBackendUrl } = useConnection()
 
-const editingAlias = ref(false)
-const aliasInput = ref("")
 const installing = ref(false)
 const fileInput = ref(null)
 
@@ -151,23 +132,12 @@ const keyPass = ref("")
 const pendingAabFile = ref(null)
 
 const displayName = computed(() => {
-  const alias = getDeviceAlias(props.device.id)
-  return alias || props.device.model || props.device.id
+  if (props.device.alias) {
+    const model = props.device.model || props.device.id
+    return `${props.device.alias}(${model})`
+  }
+  return props.device.model || props.device.id
 })
-
-function startEditAlias() {
-  aliasInput.value = getDeviceAlias(props.device.id) || props.device.model || ""
-  editingAlias.value = true
-}
-
-function saveAlias() {
-  setDeviceAlias(props.device.id, aliasInput.value.trim())
-  editingAlias.value = false
-}
-
-function cancelEditAlias() {
-  editingAlias.value = false
-}
 
 const statusClass = computed(() => ({
   online: props.device.status === "online",

@@ -6,6 +6,7 @@ import shutil
 import adbutils
 
 from app.models.device import DeviceInfo
+from app.core.alias_manager import alias_manager
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,7 @@ class DeviceManager:
     async def _poll_loop(self):
         while True:
             try:
+                alias_manager.check_reload()
                 await self._scan()
             except Exception as e:
                 logger.error(f"设备扫描异常: {e}")
@@ -143,6 +145,9 @@ class DeviceManager:
                 logger.debug(f"iOS 设备扫描失败: {e}")
 
         current = android_devices + ios_devices
+        # 填充别名
+        for d in current:
+            d.alias = alias_manager.get_alias(d.id)
         current_ids = {d.id for d in current}
         old_ids = set(self._devices.keys())
 

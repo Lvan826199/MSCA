@@ -135,7 +135,12 @@ function setPanelRef(id, el) {
 
 function getDeviceName(deviceId) {
   const dev = allDevices.value.find((d) => d.id === deviceId)
-  return dev?.model || ""
+  if (!dev) return ""
+  if (dev.alias) {
+    const model = dev.model || dev.id
+    return `${dev.alias}(${model})`
+  }
+  return dev.model || ""
 }
 
 function getApiBase() {

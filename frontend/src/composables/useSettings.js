@@ -29,8 +29,6 @@ const DEFAULTS = {
     mode: "auto", // auto | local | remote
     remoteUrl: "",
   },
-  // 设备别名 { deviceId: "别名" }
-  deviceAliases: {},
 }
 
 const isElectron = typeof window !== "undefined" && !!window.electronAPI
@@ -107,19 +105,6 @@ export function useSettings() {
 
     setGridColumns(cols) {
       settings.value.layout.gridColumns = cols
-    },
-
-    // 设备别名
-    getDeviceAlias(deviceId) {
-      return settings.value.deviceAliases[deviceId] || ""
-    },
-
-    setDeviceAlias(deviceId, alias) {
-      if (alias) {
-        settings.value.deviceAliases[deviceId] = alias
-      } else {
-        delete settings.value.deviceAliases[deviceId]
-      }
     },
 
     // 重置为默认值

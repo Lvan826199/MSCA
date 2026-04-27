@@ -54,7 +54,6 @@ import { Close, Loading } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
 import { useVideoDecoder } from "@/composables/useVideoDecoder"
 import { useDeviceControl } from "@/composables/useDeviceControl"
-import { useSettings } from "@/composables/useSettings"
 import DeviceControlBar from "./DeviceControlBar.vue"
 
 const props = defineProps({
@@ -66,12 +65,8 @@ const props = defineProps({
 
 const emit = defineEmits(["started", "stopped", "error"])
 
-const { getDeviceAlias } = useSettings()
-
-// 显示名称优先级：别名 > 传入名称 > 设备 ID 截断
+// 显示名称优先级：传入名称 > 设备 ID 截断
 const displayName = computed(() => {
-  const alias = getDeviceAlias(props.deviceId)
-  if (alias) return alias
   if (props.deviceName) return props.deviceName
   // 截断长 ID
   return props.deviceId.length > 16

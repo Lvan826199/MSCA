@@ -10,3 +10,4 @@ class DeviceInfo(BaseModel):
     version: str = ""
     resolution: str = ""
     status: str = "online"  # "online" | "offline" | "mirroring"
+    alias: str = ""  # 后端配置的规定名称
