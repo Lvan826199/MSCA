@@ -6,9 +6,10 @@
 import asyncio
 import json
 import logging
+import os
 import subprocess
 
-from .base import IOSAdapterBase, WDAInfo
+from .base import IOSAdapterBase, WDAInfo, is_port_free, kill_process_on_port
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class GoIOSAdapter(IOSAdapterBase):
         self._ios_bin = ios_bin
         self._wda_process: subprocess.Popen | None = None
         self._tunnel_process: subprocess.Popen | None = None
+        self._agent_process: subprocess.Popen | None = None
 
     async def _run_cmd(self, *args, timeout: int = 30) -> str:
         """执行 go-ios 命令并返回 stdout。"""
@@ -79,6 +81,17 @@ class GoIOSAdapter(IOSAdapterBase):
         """启动 WDA 并建立端口转发隧道。"""
         await self.stop_wda()
 
+        # 确保端口空闲
+        if not is_port_free(port):
+            logger.warning(f"[{self.udid}] 端口 {port} 被占用，尝试清理残留进程")
+            kill_process_on_port(port)
+            await asyncio.sleep(0.5)
+            if not is_port_free(port):
+                raise RuntimeError(f"端口 {port} 仍被占用，无法启动 WDA")
+
+        # iOS 17+ 需要先启动 tunnel agent
+        await self._ensure_tunnel()
+
         # 启动端口转发隧道
         logger.info(f"[{self.udid}] 启动 go-ios 端口转发 {port}")
         self._tunnel_process = subprocess.Popen(
@@ -112,8 +125,8 @@ class GoIOSAdapter(IOSAdapterBase):
         raise TimeoutError(f"[{self.udid}] WDA 启动超时（30s）")
 
     async def stop_wda(self) -> None:
-        """停止 WDA 和端口转发进程。"""
-        for proc in [self._wda_process, self._tunnel_process]:
+        """停止 WDA、端口转发和 tunnel agent 进程。"""
+        for proc in [self._wda_process, self._tunnel_process, self._agent_process]:
             if proc:
                 try:
                     proc.terminate()
@@ -125,7 +138,49 @@ class GoIOSAdapter(IOSAdapterBase):
                         pass
         self._wda_process = None
         self._tunnel_process = None
+        self._agent_process = None
         self.wda_info = None
+
+    async def _ensure_tunnel(self) -> None:
+        """确保 go-ios tunnel agent 正在运行（iOS 17+ 必需）。
+
+        go-ios 需要 `ios tunnel start` 来建立与 iOS 17+ 设备的通信隧道。
+        如果 agent 已在运行（由其他进程启动），则跳过。
+        """
+        # 先检查是否已有 agent 在运行（通过 tunnel ls 测试）
+        try:
+            await self._run_cmd("tunnel", "ls", timeout=5)
+            logger.debug(f"[{self.udid}] go-ios tunnel agent 已在运行")
+            return
+        except Exception:
+            pass
+
+        # 启动 tunnel agent（后台进程，使用 userspace 模式）
+        logger.info(f"[{self.udid}] 启动 go-ios tunnel agent")
+        try:
+            self._agent_process = subprocess.Popen(
+                [self._ios_bin, "tunnel", "start"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env={**os.environ, "ENABLE_GO_IOS_AGENT": "user"},
+            )
+            # 等待 tunnel 就绪
+            for _ in range(10):
+                await asyncio.sleep(1)
+                if self._agent_process.poll() is not None:
+                    stderr = self._agent_process.stderr.read().decode(errors="replace") if self._agent_process.stderr else ""
+                    logger.warning(f"[{self.udid}] tunnel agent 退出: {stderr[:500]}")
+                    break
+                # 检查 tunnel 是否就绪
+                try:
+                    await self._run_cmd("tunnel", "ls", timeout=3)
+                    logger.info(f"[{self.udid}] go-ios tunnel agent 就绪")
+                    return
+                except Exception:
+                    continue
+            logger.warning(f"[{self.udid}] tunnel agent 未能在 10s 内就绪，继续尝试启动 WDA")
+        except Exception as e:
+            logger.warning(f"[{self.udid}] 启动 tunnel agent 失败: {e}，继续尝试启动 WDA")
 
     async def get_device_info(self) -> dict:
         """获取设备详细信息。"""

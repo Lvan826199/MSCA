@@ -4,10 +4,56 @@
 """
 
 import logging
+import os
+import socket
+import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+def is_port_free(port: int) -> bool:
+    """检查本地端口是否空闲。"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", port))
+            return True
+    except OSError:
+        return False
+
+
+def kill_process_on_port(port: int) -> None:
+    """尝试杀掉占用指定端口的进程（跨平台）。"""
+    try:
+        if os.name == "nt":
+            # Windows: netstat + taskkill
+            result = subprocess.run(
+                ["netstat", "-ano", "-p", "TCP"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.splitlines():
+                if f"127.0.0.1:{port}" in line and "LISTENING" in line:
+                    parts = line.split()
+                    pid = int(parts[-1])
+                    if pid > 0:
+                        subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                       capture_output=True, timeout=5)
+                        logger.info(f"已杀掉占用端口 {port} 的进程 PID={pid}")
+        else:
+            # macOS / Linux: lsof + kill
+            result = subprocess.run(
+                ["lsof", "-ti", f"tcp:{port}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for pid_str in result.stdout.strip().splitlines():
+                pid = int(pid_str.strip())
+                if pid > 0:
+                    subprocess.run(["kill", "-9", str(pid)],
+                                   capture_output=True, timeout=5)
+                    logger.info(f"已杀掉占用端口 {port} 的进程 PID={pid}")
+    except Exception as e:
+        logger.debug(f"清理端口 {port} 失败: {e}")
 
 
 @dataclass

@@ -6,6 +6,7 @@
 
 import asyncio
 import logging
+import socket
 from typing import Callable
 
 import aiohttp
@@ -24,8 +25,18 @@ _port_counter = 0
 
 
 def _allocate_wda_port() -> int:
-    """分配 WDA 端口。"""
+    """分配 WDA 端口，跳过已被占用的端口。"""
     global _port_counter
+    for _ in range(20):  # 最多尝试 20 个端口
+        port = IOS_WDA_BASE_PORT + _port_counter * IOS_WDA_PORT_STEP
+        _port_counter += 1
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", port))
+                return port
+        except OSError:
+            logger.warning(f"WDA 端口 {port} 已被占用，跳过")
+    # 兜底：返回当前计数对应的端口
     port = IOS_WDA_BASE_PORT + _port_counter * IOS_WDA_PORT_STEP
     _port_counter += 1
     return port
@@ -261,16 +272,17 @@ class IOSDriver(AbstractDeviceDriver):
     async def _read_mjpeg_loop(self):
         """持续读取 WDA MJPEG 流并分发给订阅者。"""
         base = f"http://{self._adapter.wda_info.host}:{self._adapter.wda_info.port}"
-        url = f"{base}/stream"
 
         while self._is_mirroring:
             try:
-                async with self._http.get(url, timeout=aiohttp.ClientTimeout(total=None)) as resp:
-                    boundary = None
-                    content_type = resp.headers.get("Content-Type", "")
-                    if "boundary=" in content_type:
-                        boundary = content_type.split("boundary=")[1].strip()
+                # 尝试多个 MJPEG 端点（不同 WDA 版本路径不同）
+                stream_url = await self._find_mjpeg_url(base)
+                if not stream_url:
+                    logger.error(f"[{self.device_id}] 未找到可用的 MJPEG 流端点")
+                    await asyncio.sleep(2)
+                    continue
 
+                async with self._http.get(stream_url, timeout=aiohttp.ClientTimeout(total=None)) as resp:
                     buffer = b""
                     async for chunk in resp.content.iter_any():
                         if not self._is_mirroring:
@@ -300,3 +312,26 @@ class IOSDriver(AbstractDeviceDriver):
                 if self._is_mirroring:
                     logger.warning(f"[{self.device_id}] MJPEG 流中断: {e}，2 秒后重连")
                     await asyncio.sleep(2)
+
+    async def _find_mjpeg_url(self, base: str) -> str | None:
+        """探测可用的 MJPEG 流端点。"""
+        # 不同 WDA 版本的 MJPEG 端点路径
+        candidates = [
+            f"{base}/stream.mjpeg",
+            f"{base}/stream",
+        ]
+        for url in candidates:
+            try:
+                async with self._http.get(
+                    url, timeout=aiohttp.ClientTimeout(total=3)
+                ) as resp:
+                    if resp.status == 200:
+                        content_type = resp.headers.get("Content-Type", "")
+                        if "multipart" in content_type or "jpeg" in content_type or "octet" in content_type:
+                            logger.info(f"[{self.device_id}] MJPEG 流端点: {url}")
+                            return url
+            except Exception:
+                continue
+        # 兜底返回第一个
+        logger.warning(f"[{self.device_id}] 无法探测 MJPEG 端点，使用默认 /stream.mjpeg")
+        return candidates[0]

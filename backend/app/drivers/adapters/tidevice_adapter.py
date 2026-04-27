@@ -7,7 +7,7 @@ import asyncio
 import logging
 import subprocess
 
-from .base import IOSAdapterBase, WDAInfo
+from .base import IOSAdapterBase, WDAInfo, is_port_free, kill_process_on_port
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +67,69 @@ class TideviceAdapter(IOSAdapterBase):
             return False
 
     async def start_wda(self, port: int = 8100) -> WDAInfo:
-        """启动 WDA 代理（wdaproxy），自动建立端口转发。"""
+        """启动 WDA 代理。
+
+        策略：先检测设备上 WDA 是否已在运行（用户手动启动的场景），
+        如果已运行则只做端口转发（relay），否则启动完整的 wdaproxy。
+        """
         await self.stop_wda()
 
-        logger.info(f"[{self.udid}] 启动 WDA 代理，端口 {port}")
+        # 确保端口空闲，否则尝试杀掉残留进程
+        if not is_port_free(port):
+            logger.warning(f"[{self.udid}] 端口 {port} 被占用，尝试清理残留进程")
+            kill_process_on_port(port)
+            await asyncio.sleep(0.5)
+            if not is_port_free(port):
+                raise RuntimeError(f"端口 {port} 仍被占用，无法启动 WDA 代理")
+
+        # 先尝试 relay 模式：如果设备上 WDA 已在运行，只需端口转发即可
+        if await self._try_relay_mode(port):
+            return self.wda_info
+
+        # WDA 未在运行，启动完整的 wdaproxy
+        return await self._start_wdaproxy(port)
+
+    async def _try_relay_mode(self, port: int) -> bool:
+        """尝试 relay 模式：端口转发到设备 8100，检测 WDA 是否已在运行。"""
+        logger.info(f"[{self.udid}] 尝试 relay 模式（检测 WDA 是否已在设备上运行）")
+        self._proxy_process = subprocess.Popen(
+            ["tidevice", "-u", self.udid, "relay", str(port), "8100"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # 等待 relay 进程启动并检测 WDA 健康
+        for _ in range(5):
+            await asyncio.sleep(0.5)
+            if self._proxy_process.poll() is not None:
+                # relay 进程退出了，说明端口转发失败
+                logger.debug(f"[{self.udid}] relay 进程退出，WDA 可能未在运行")
+                self._proxy_process = None
+                return False
+
+            self.wda_info = WDAInfo(host="127.0.0.1", port=port)
+            if await self.check_wda_health():
+                logger.info(f"[{self.udid}] WDA 已在设备上运行，relay 模式就绪 @ {port}")
+                return True
+
+        # 超时，WDA 未响应，清理 relay 进程
+        logger.debug(f"[{self.udid}] relay 模式超时，WDA 未在设备上运行")
+        if self._proxy_process:
+            try:
+                self._proxy_process.terminate()
+                self._proxy_process.wait(timeout=3)
+            except Exception:
+                try:
+                    self._proxy_process.kill()
+                except Exception:
+                    pass
+            self._proxy_process = None
+        self.wda_info = None
+        return False
+
+    async def _start_wdaproxy(self, port: int) -> WDAInfo:
+        """启动完整的 wdaproxy（启动 WDA + 端口转发）。"""
+        logger.info(f"[{self.udid}] 启动 WDA 代理（wdaproxy），端口 {port}")
         self._proxy_process = subprocess.Popen(
             ["tidevice", "-u", self.udid, "wdaproxy", "-p", str(port)],
             stdout=subprocess.PIPE,
