@@ -143,5 +143,6 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
+  align-items: stretch;
 }
 </style>

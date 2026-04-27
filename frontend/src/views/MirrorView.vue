@@ -140,13 +140,20 @@ function setPanelRef(id, el) {
 }
 
 function getDeviceName(deviceId) {
+  const MAX_LEN = 18
   const dev = globalDevices.value.find((d) => d.id === deviceId)
   if (!dev) return ""
   if (dev.alias) {
     const model = dev.model || dev.id
-    return `${dev.alias}(${model})`
+    const full = `${dev.alias}(${model})`
+    if (full.length <= MAX_LEN) return full
+    const prefix = dev.alias
+    const remain = MAX_LEN - prefix.length - 2
+    if (remain >= 2) return `${prefix}(${model.slice(0, remain - 1)}…)`
+    return full.slice(0, MAX_LEN - 1) + "…"
   }
-  return dev.model || ""
+  const name = dev.model || ""
+  return name.length > MAX_LEN ? name.slice(0, MAX_LEN - 1) + "…" : name
 }
 
 function getApiBase() {

@@ -273,16 +273,26 @@ class IOSDriver(AbstractDeviceDriver):
         """持续读取 WDA MJPEG 流并分发给订阅者。"""
         base = f"http://{self._adapter.wda_info.host}:{self._adapter.wda_info.port}"
 
+        # 首次探测 MJPEG 端点，带重试（WDA 刚启动可能还没就绪）
+        stream_url = None
+        for attempt in range(5):
+            stream_url = await self._find_mjpeg_url(base)
+            if stream_url:
+                break
+            logger.info(f"[{self.device_id}] MJPEG 端点探测第 {attempt + 1} 次失败，2 秒后重试")
+            await asyncio.sleep(2)
+
+        if not stream_url:
+            logger.error(f"[{self.device_id}] 多次探测均未找到可用的 MJPEG 流端点")
+            return
+
         while self._is_mirroring:
             try:
-                # 尝试多个 MJPEG 端点（不同 WDA 版本路径不同）
-                stream_url = await self._find_mjpeg_url(base)
-                if not stream_url:
-                    logger.error(f"[{self.device_id}] 未找到可用的 MJPEG 流端点")
-                    await asyncio.sleep(2)
-                    continue
-
-                async with self._http.get(stream_url, timeout=aiohttp.ClientTimeout(total=None)) as resp:
+                async with self._http.get(stream_url, timeout=aiohttp.ClientTimeout(total=None, sock_connect=10)) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"[{self.device_id}] MJPEG 流返回 HTTP {resp.status}，2 秒后重试")
+                        await asyncio.sleep(2)
+                        continue
                     buffer = b""
                     async for chunk in resp.content.iter_any():
                         if not self._is_mirroring:
@@ -319,18 +329,29 @@ class IOSDriver(AbstractDeviceDriver):
         candidates = [
             f"{base}/stream.mjpeg",
             f"{base}/stream",
+            f"{base}/screenshot/stream",
         ]
         for url in candidates:
             try:
                 async with self._http.get(
-                    url, timeout=aiohttp.ClientTimeout(total=3)
+                    url, timeout=aiohttp.ClientTimeout(total=8, sock_connect=5)
                 ) as resp:
                     if resp.status == 200:
                         content_type = resp.headers.get("Content-Type", "")
-                        if "multipart" in content_type or "jpeg" in content_type or "octet" in content_type:
-                            logger.info(f"[{self.device_id}] MJPEG 流端点: {url}")
+                        # 宽松匹配：只要不是明确的 JSON/HTML 就认为是流
+                        if any(kw in content_type for kw in ("multipart", "jpeg", "octet", "image", "stream")):
+                            logger.info(f"[{self.device_id}] MJPEG 流端点: {url} (Content-Type: {content_type})")
                             return url
-            except Exception:
+                        # 即使 Content-Type 不匹配，尝试读取前几字节看是否是 JPEG
+                        head = await resp.content.read(2)
+                        if head == b"\xff\xd8":
+                            logger.info(f"[{self.device_id}] MJPEG 流端点（JPEG 头匹配）: {url}")
+                            return url
+            except asyncio.TimeoutError:
+                logger.debug(f"[{self.device_id}] MJPEG 端点探测超时: {url}")
+                continue
+            except Exception as e:
+                logger.debug(f"[{self.device_id}] MJPEG 端点探测失败: {url} -> {e}")
                 continue
         # 兜底返回第一个
         logger.warning(f"[{self.device_id}] 无法探测 MJPEG 端点，使用默认 /stream.mjpeg")

@@ -16,29 +16,32 @@
       </el-form-item>
 
       <!-- 投屏参数 -->
-      <el-divider content-position="left">投屏参数</el-divider>
+      <el-divider content-position="left">投屏参数（仅 Android）</el-divider>
       <el-form-item label="最大帧率">
         <el-select v-model="settings.mirror.maxFps">
-          <el-option :value="15" label="15 fps" />
-          <el-option :value="30" label="30 fps" />
-          <el-option :value="60" label="60 fps" />
+          <el-option :value="15" label="15 fps（省流量）" />
+          <el-option :value="30" label="30 fps（默认）" />
+          <el-option :value="60" label="60 fps（高流畅）" />
         </el-select>
+        <div class="form-tip">帧率越高画面越流畅，但占用更多带宽和 CPU</div>
       </el-form-item>
       <el-form-item label="码率">
         <el-select v-model="settings.mirror.bitrate">
-          <el-option :value="2_000_000" label="2 Mbps" />
-          <el-option :value="4_000_000" label="4 Mbps" />
+          <el-option :value="2_000_000" label="2 Mbps（低画质）" />
+          <el-option :value="4_000_000" label="4 Mbps（均衡）" />
           <el-option :value="8_000_000" label="8 Mbps（默认）" />
-          <el-option :value="16_000_000" label="16 Mbps" />
+          <el-option :value="16_000_000" label="16 Mbps（高画质）" />
         </el-select>
+        <div class="form-tip">码率越高画质越清晰，但传输数据量更大。卡顿时建议降低码率</div>
       </el-form-item>
       <el-form-item label="最大分辨率">
         <el-select v-model="settings.mirror.maxSize">
-          <el-option :value="0" label="不限制" />
-          <el-option :value="720" label="720p" />
+          <el-option :value="0" label="不限制（原始分辨率）" />
+          <el-option :value="720" label="720p（推荐，流畅优先）" />
           <el-option :value="1080" label="1080p" />
           <el-option :value="1440" label="1440p" />
         </el-select>
+        <div class="form-tip">限制分辨率可显著降低编码压力和传输量，多设备投屏建议 720p</div>
       </el-form-item>
 
       <!-- 布局 -->
@@ -82,5 +85,12 @@ function resetSettings() {
 .settings-view h3 {
   font-size: 18px;
   color: #e5eaf3;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.4;
+  margin-top: 4px;
 }
 </style>

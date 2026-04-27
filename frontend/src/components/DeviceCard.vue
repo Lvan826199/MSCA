@@ -132,11 +132,22 @@ const keyPass = ref("")
 const pendingAabFile = ref(null)
 
 const displayName = computed(() => {
+  const MAX_LEN = 18
   if (props.device.alias) {
     const model = props.device.model || props.device.id
-    return `${props.device.alias}(${model})`
+    const full = `${props.device.alias}(${model})`
+    if (full.length <= MAX_LEN) return full
+    // 括号内容截断
+    const prefix = props.device.alias
+    const remain = MAX_LEN - prefix.length - 2 // 2 = '(' + ')'
+    if (remain >= 2) {
+      return `${prefix}(${model.slice(0, remain - 1)}…)`
+    }
+    // alias 本身就很长，直接截断
+    return full.slice(0, MAX_LEN - 1) + "…"
   }
-  return props.device.model || props.device.id
+  const name = props.device.model || props.device.id
+  return name.length > MAX_LEN ? name.slice(0, MAX_LEN - 1) + "…" : name
 })
 
 const statusClass = computed(() => ({
@@ -295,6 +306,9 @@ async function doInstall(file, signingOpts = null) {
 
 .device-card :deep(.el-card__body) {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .device-header {
@@ -369,6 +383,7 @@ async function doInstall(file, signingOpts = null) {
 
 .device-info {
   margin-bottom: 12px;
+  flex: 1;
 }
 
 .info-row {
@@ -428,5 +443,8 @@ async function doInstall(file, signingOpts = null) {
 .device-actions {
   display: flex;
   gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid #2a2a2a;
 }
 </style>

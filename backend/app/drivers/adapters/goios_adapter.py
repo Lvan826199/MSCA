@@ -155,32 +155,78 @@ class GoIOSAdapter(IOSAdapterBase):
         except Exception:
             pass
 
-        # 启动 tunnel agent（后台进程，使用 userspace 模式）
-        logger.info(f"[{self.udid}] 启动 go-ios tunnel agent")
-        try:
-            self._agent_process = subprocess.Popen(
-                [self._ios_bin, "tunnel", "start"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env={**os.environ, "ENABLE_GO_IOS_AGENT": "user"},
-            )
-            # 等待 tunnel 就绪
-            for _ in range(10):
-                await asyncio.sleep(1)
-                if self._agent_process.poll() is not None:
-                    stderr = self._agent_process.stderr.read().decode(errors="replace") if self._agent_process.stderr else ""
-                    logger.warning(f"[{self.udid}] tunnel agent 退出: {stderr[:500]}")
-                    break
-                # 检查 tunnel 是否就绪
-                try:
-                    await self._run_cmd("tunnel", "ls", timeout=3)
-                    logger.info(f"[{self.udid}] go-ios tunnel agent 就绪")
-                    return
-                except Exception:
-                    continue
-            logger.warning(f"[{self.udid}] tunnel agent 未能在 10s 内就绪，继续尝试启动 WDA")
-        except Exception as e:
-            logger.warning(f"[{self.udid}] 启动 tunnel agent 失败: {e}，继续尝试启动 WDA")
+        # 尝试多种方式启动 tunnel agent
+        tunnel_cmds = [
+            # 方式 1: userspace 模式（不需要管理员权限）
+            {
+                "args": [self._ios_bin, "tunnel", "start", "--userspace"],
+                "env": {**os.environ, "ENABLE_GO_IOS_AGENT": "1"},
+                "desc": "userspace 模式",
+            },
+            # 方式 2: 默认模式
+            {
+                "args": [self._ios_bin, "tunnel", "start"],
+                "env": {**os.environ, "ENABLE_GO_IOS_AGENT": "1"},
+                "desc": "默认模式",
+            },
+        ]
+
+        last_error = ""
+        for tunnel_cfg in tunnel_cmds:
+            logger.info(f"[{self.udid}] 启动 go-ios tunnel agent ({tunnel_cfg['desc']})")
+            try:
+                self._agent_process = subprocess.Popen(
+                    tunnel_cfg["args"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=tunnel_cfg["env"],
+                )
+                # 等待 tunnel 就绪
+                for _ in range(15):
+                    await asyncio.sleep(1)
+                    if self._agent_process.poll() is not None:
+                        stderr = self._agent_process.stderr.read().decode(errors="replace") if self._agent_process.stderr else ""
+                        last_error = stderr[:500]
+                        logger.warning(f"[{self.udid}] tunnel agent ({tunnel_cfg['desc']}) 退出: {last_error}")
+                        self._agent_process = None
+                        break
+                    # 检查 tunnel 是否就绪
+                    try:
+                        await self._run_cmd("tunnel", "ls", timeout=3)
+                        logger.info(f"[{self.udid}] go-ios tunnel agent 就绪 ({tunnel_cfg['desc']})")
+                        return
+                    except Exception:
+                        continue
+                else:
+                    # 15 秒超时但进程还活着，再检查一次
+                    try:
+                        await self._run_cmd("tunnel", "ls", timeout=3)
+                        logger.info(f"[{self.udid}] go-ios tunnel agent 就绪 ({tunnel_cfg['desc']})")
+                        return
+                    except Exception:
+                        last_error = f"tunnel agent ({tunnel_cfg['desc']}) 15s 内未就绪"
+                        logger.warning(f"[{self.udid}] {last_error}")
+                        # 清理未就绪的进程
+                        if self._agent_process:
+                            try:
+                                self._agent_process.terminate()
+                                self._agent_process.wait(timeout=3)
+                            except Exception:
+                                try:
+                                    self._agent_process.kill()
+                                except Exception:
+                                    pass
+                            self._agent_process = None
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"[{self.udid}] 启动 tunnel agent ({tunnel_cfg['desc']}) 失败: {e}")
+
+        # 所有方式都失败了，抛出明确错误
+        raise RuntimeError(
+            f"go-ios tunnel 启动失败（iOS 17+ 必需）。"
+            f"请确保：1) 以管理员身份运行，或 2) go-ios 版本支持 --userspace 模式。"
+            f"最后错误: {last_error}"
+        )
 
     async def get_device_info(self) -> dict:
         """获取设备详细信息。"""
