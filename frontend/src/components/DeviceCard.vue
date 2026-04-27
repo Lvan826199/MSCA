@@ -33,7 +33,15 @@
       </div>
       <div class="info-row">
         <span class="info-label">设备 ID</span>
-        <span class="info-value">{{ device.id }}</span>
+        <span class="info-value device-id-value" :title="device.id">
+          {{ truncatedId }}
+          <span class="copy-id-btn" @click.stop="copyDeviceId" title="复制设备 ID">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </span>
+        </span>
       </div>
       <div v-if="device.version" class="info-row">
         <span class="info-label">系统版本</span>
@@ -178,6 +186,22 @@ const statusTextClass = computed(() => ({
   "text-mirroring": props.device.status === "mirroring",
   "text-offline": props.device.status === "offline",
 }))
+
+const truncatedId = computed(() => {
+  const id = props.device.id || ""
+  if (id.length > 16) {
+    return id.slice(0, 6) + "..." + id.slice(-6)
+  }
+  return id
+})
+
+function copyDeviceId() {
+  navigator.clipboard.writeText(props.device.id).then(() => {
+    ElMessage.success("设备 ID 已复制")
+  }).catch(() => {
+    ElMessage.error("复制失败")
+  })
+}
 
 const platformBadgeClass = computed(() => ({
   "badge-android": props.device.platform === "android",
@@ -352,9 +376,9 @@ async function doInstall(file, signingOpts = null) {
 }
 
 .badge-ios {
-  background: rgba(147, 147, 149, 0.15);
-  color: #a0a0a2;
-  border: 1px solid rgba(147, 147, 149, 0.3);
+  background: rgba(0, 122, 255, 0.15);
+  color: #5ac8fa;
+  border: 1px solid rgba(0, 122, 255, 0.3);
 }
 
 .platform-icon {
@@ -384,6 +408,27 @@ async function doInstall(file, signingOpts = null) {
 .info-value {
   color: #c0c4cc;
   font-family: monospace;
+}
+
+.device-id-value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.copy-id-btn {
+  cursor: pointer;
+  color: #909399;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 3px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.copy-id-btn:hover {
+  color: #409eff;
+  background: rgba(64, 158, 255, 0.1);
 }
 
 .status-text {
