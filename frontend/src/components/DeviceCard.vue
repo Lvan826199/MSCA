@@ -1,5 +1,5 @@
 <template>
-  <el-card class="device-card" shadow="hover">
+  <el-card class="device-card" :class="cardPlatformClass" shadow="hover">
     <div class="device-header">
       <div class="device-status">
         <span class="status-dot" :class="statusClass" />
@@ -21,7 +21,6 @@
         />
       </div>
       <div class="platform-badge" :class="platformBadgeClass">
-        <span class="platform-icon">{{ device.platform === 'android' ? 'A' : 'i' }}</span>
         <span class="platform-name">{{ device.platform === 'android' ? 'Android' : 'iOS' }}</span>
       </div>
     </div>
@@ -203,6 +202,11 @@ function copyDeviceId() {
   })
 }
 
+const cardPlatformClass = computed(() => ({
+  "card-android": props.device.platform === "android",
+  "card-ios": props.device.platform !== "android",
+}))
+
 const platformBadgeClass = computed(() => ({
   "badge-android": props.device.platform === "android",
   "badge-ios": props.device.platform !== "android",
@@ -311,6 +315,14 @@ async function doInstall(file, signingOpts = null) {
   width: 280px;
 }
 
+.device-card.card-android {
+  border-left: 3px solid #3ddc84;
+}
+
+.device-card.card-ios {
+  border-left: 3px solid #5ac8fa;
+}
+
 .device-card :deep(.el-card__body) {
   padding: 16px;
 }
@@ -379,11 +391,6 @@ async function doInstall(file, signingOpts = null) {
   background: rgba(0, 122, 255, 0.15);
   color: #5ac8fa;
   border: 1px solid rgba(0, 122, 255, 0.3);
-}
-
-.platform-icon {
-  font-weight: 700;
-  font-size: 13px;
 }
 
 .platform-name {
