@@ -264,69 +264,119 @@ class GoIOSAdapter(IOSAdapterBase):
         logger.debug(f"[{self.udid}] go-ios 所有子进程已清理")
 
     async def _ensure_tunnel(self) -> None:
-        """确保 go-ios tunnel agent 正在运行（iOS 17+ 必需）。"""
+        """确保 go-ios tunnel agent 正在运行（iOS 17+ 必需）。
+
+        三阶段策略：
+        1. 检测 tunnel 是否已在运行
+        2. 尝试 --userspace 模式（无需管理员权限）
+        3. 提权启动默认模式（弹出 UAC/密码框）
+        """
+        tunnel_env = {**os.environ, "ENABLE_GO_IOS_AGENT": "1"}
+
+        # ── 阶段 1：检测 tunnel 是否已在运行 ──
         try:
             await self._run_cmd("tunnel", "ls", timeout=5)
             logger.debug(f"[{self.udid}] go-ios tunnel agent 已在运行")
             return
         except Exception:
-            pass
+            logger.debug(f"[{self.udid}] tunnel 未在运行，开始启动流程")
 
-        tunnel_cmds = [
-            {
-                "args": [self._ios_bin, "tunnel", "start", "--userspace"],
-                "env": {**os.environ, "ENABLE_GO_IOS_AGENT": "1"},
-                "desc": "userspace 模式",
-            },
-            {
-                "args": [self._ios_bin, "tunnel", "start"],
-                "env": {**os.environ, "ENABLE_GO_IOS_AGENT": "1"},
-                "desc": "默认模式",
-            },
-        ]
+        # ── 阶段 2：尝试 userspace 模式（无需管理员权限） ──
+        logger.info(f"[{self.udid}] 尝试 tunnel start --userspace（无需管理员权限）")
+        if await self._try_tunnel_start(
+            [self._ios_bin, "tunnel", "start", "--userspace"],
+            tunnel_env, "userspace",
+        ):
+            return
 
-        last_error = ""
-        for tunnel_cfg in tunnel_cmds:
-            logger.info(f"[{self.udid}] 启动 go-ios tunnel agent ({tunnel_cfg['desc']})")
+        # ── 阶段 3：提权启动默认模式 ──
+        from .privilege import check_is_admin, launch_elevated
+
+        if check_is_admin():
+            # 已是管理员，直接启动
+            logger.info(f"[{self.udid}] 当前已是管理员，直接启动 tunnel start")
+            if await self._try_tunnel_start(
+                [self._ios_bin, "tunnel", "start"],
+                tunnel_env, "默认模式（管理员）",
+            ):
+                return
+        else:
+            # 需要提权
+            logger.info(f"[{self.udid}] 请求管理员权限启动 tunnel start...")
             try:
-                self._agent_process = subprocess.Popen(
-                    tunnel_cfg["args"],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    env=tunnel_cfg["env"],
+                launched = await asyncio.to_thread(
+                    launch_elevated,
+                    [self._ios_bin, "tunnel", "start"],
+                    tunnel_env,
                 )
-                for _ in range(15):
-                    await asyncio.sleep(1)
-                    if self._agent_process.poll() is not None:
-                        stderr = self._agent_process.stderr.read().decode(errors="replace") if self._agent_process.stderr else ""
-                        last_error = stderr[:500]
-                        logger.warning(f"[{self.udid}] tunnel agent ({tunnel_cfg['desc']}) 退出: {last_error}")
-                        self._agent_process = None
-                        break
-                    try:
-                        await self._run_cmd("tunnel", "ls", timeout=3)
-                        logger.info(f"[{self.udid}] go-ios tunnel agent 就绪 ({tunnel_cfg['desc']})")
-                        return
-                    except Exception:
-                        continue
+                if launched:
+                    # 提权启动的是独立守护进程，轮询 tunnel ls 确认就绪
+                    for i in range(20):
+                        await asyncio.sleep(1)
+                        try:
+                            await self._run_cmd("tunnel", "ls", timeout=3)
+                            logger.info(f"[{self.udid}] tunnel agent 就绪（提权启动，等待 {i+1}s）")
+                            return
+                        except Exception:
+                            continue
+                    logger.warning(f"[{self.udid}] 提权启动后 20s 内 tunnel 未就绪")
                 else:
-                    try:
-                        await self._run_cmd("tunnel", "ls", timeout=3)
-                        logger.info(f"[{self.udid}] go-ios tunnel agent 就绪 ({tunnel_cfg['desc']})")
-                        return
-                    except Exception:
-                        last_error = f"tunnel agent ({tunnel_cfg['desc']}) 15s 内未就绪"
-                        logger.warning(f"[{self.udid}] {last_error}")
-                        self._kill_process(self._agent_process)
-                        self._agent_process = None
+                    logger.warning(f"[{self.udid}] 管理员权限请求被拒绝或失败")
             except Exception as e:
-                last_error = str(e)
-                logger.warning(f"[{self.udid}] 启动 tunnel agent ({tunnel_cfg['desc']}) 失败: {e}")
+                logger.warning(f"[{self.udid}] 提权启动异常: {e}")
 
         raise RuntimeError(
-            f"go-ios tunnel 启动失败（iOS 17+ 必需）。"
-            f"请确保：1) 以管理员身份运行，或 2) go-ios 版本支持 --userspace 模式。"
-            f"最后错误: {last_error}"
+            "go-ios tunnel 启动失败（iOS 17+ 必需）。\n"
+            "尝试过的方式：\n"
+            "  1) --userspace 模式（无需管理员）\n"
+            "  2) 管理员提权启动\n"
+            "请手动执行以下任一操作：\n"
+            "  - Windows: 以管理员身份运行 scripts/ios-tunnel.bat\n"
+            "  - macOS/Linux: 运行 scripts/ios-tunnel.sh\n"
+            "  - 或手动执行: ios tunnel start（需管理员/sudo）"
         )
+
+    async def _try_tunnel_start(
+        self, args: list[str], env: dict, desc: str, timeout_s: int = 15,
+    ) -> bool:
+        """尝试启动 tunnel 并等待就绪。
+
+        Args:
+            args: 命令参数列表
+            env: 环境变量
+            desc: 描述（用于日志）
+            timeout_s: 最大等待秒数
+
+        Returns:
+            True 表示 tunnel 已就绪
+        """
+        try:
+            self._agent_process = subprocess.Popen(
+                args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+            )
+            for i in range(timeout_s):
+                await asyncio.sleep(1)
+                if self._agent_process.poll() is not None:
+                    stderr = ""
+                    if self._agent_process.stderr:
+                        stderr = self._agent_process.stderr.read().decode(errors="replace")
+                    logger.warning(f"[{self.udid}] tunnel ({desc}) 进程退出: {stderr[:500]}")
+                    self._agent_process = None
+                    return False
+                try:
+                    await self._run_cmd("tunnel", "ls", timeout=3)
+                    logger.info(f"[{self.udid}] tunnel agent 就绪 ({desc}，等待 {i+1}s)")
+                    return True
+                except Exception:
+                    continue
+
+            logger.warning(f"[{self.udid}] tunnel ({desc}) {timeout_s}s 内未就绪")
+            self._kill_process(self._agent_process)
+            self._agent_process = None
+            return False
+        except Exception as e:
+            logger.warning(f"[{self.udid}] tunnel ({desc}) 启动失败: {e}")
+            return False
 
     async def get_device_info(self) -> dict:
         """获取设备详细信息。"""
