@@ -3,14 +3,58 @@
 定义 Tidevice 和 go-ios 共用的接口，统一 WDA 管理、端口转发、设备信息获取。
 """
 
+import json
 import logging
 import os
 import socket
 import subprocess
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+# ─── WDA 配置加载 ───
+
+_wda_config_cache: dict | None = None
+
+
+def load_wda_config() -> dict:
+    """加载 WDA 配置（backend/config/wda_config.json），带缓存。"""
+    global _wda_config_cache
+    if _wda_config_cache is not None:
+        return _wda_config_cache
+
+    # backend/app/drivers/adapters/base.py → backend/config/wda_config.json
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.normpath(os.path.join(base_dir, "..", "..", "..", "config", "wda_config.json"))
+
+    defaults = {
+        "wda_bundle_id": "",
+        "wda_bundle_id_pattern": "com.*.xctrunner",
+        "mjpeg_port_on_device": 9100,
+        "wda_port_on_device": 8100,
+    }
+
+    if os.path.isfile(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            defaults.update({k: v for k, v in data.items() if k in defaults})
+            logger.info(f"WDA 配置已加载: {config_path}")
+        except Exception as e:
+            logger.warning(f"WDA 配置加载失败，使用默认值: {e}")
+    else:
+        logger.info("WDA 配置文件不存在，使用默认值")
+
+    _wda_config_cache = defaults
+    return defaults
+
+
+def reload_wda_config() -> dict:
+    """强制重新加载 WDA 配置。"""
+    global _wda_config_cache
+    _wda_config_cache = None
+    return load_wda_config()
 
 
 def is_port_free(port: int) -> bool:
@@ -62,6 +106,7 @@ class WDAInfo:
 
     host: str = "127.0.0.1"
     port: int = 8100
+    mjpeg_port: int = 0  # MJPEG 流本地端口（设备端 9100 转发到此端口）
     session_id: str = ""
 
 
@@ -86,14 +131,15 @@ class IOSAdapterBase(ABC):
         """安装 WDA 到设备。"""
 
     @abstractmethod
-    async def start_wda(self, port: int = 8100) -> WDAInfo:
+    async def start_wda(self, port: int = 8100, mjpeg_port: int = 0) -> WDAInfo:
         """启动 WDA 服务并建立端口转发。
 
         Args:
-            port: 本地监听端口
+            port: WDA API 本地监听端口
+            mjpeg_port: MJPEG 流本地监听端口（转发设备端 9100）
 
         Returns:
-            WDA 服务信息
+            WDA 服务信息（含 mjpeg_port）
         """
 
     @abstractmethod
@@ -114,6 +160,19 @@ class IOSAdapterBase(ABC):
             url = f"http://{self.wda_info.host}:{self.wda_info.port}/status"
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
-                    return resp.status == 200
-        except Exception:
+                    if resp.status == 200:
+                        logger.debug(f"[{self.udid}] WDA 健康检查通过 @ {url}")
+                        return True
+                    logger.debug(f"[{self.udid}] WDA 健康检查返回 {resp.status}")
+                    return False
+        except Exception as e:
+            logger.debug(f"[{self.udid}] WDA 健康检查失败: {e}")
             return False
+
+    async def detect_wda_bundle_id(self) -> str:
+        """自动检测设备上已安装的 WDA bundle ID。
+
+        参考 tidevice 的 fnmatch 模糊匹配方式（com.*.xctrunner）。
+        子类可覆盖此方法提供平台特定实现。
+        """
+        return ""

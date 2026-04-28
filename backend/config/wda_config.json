@@ -1,0 +1,7 @@
+{
+  "wda_bundle_id": "",
+  "wda_bundle_id_pattern": "com.*.xctrunner",
+  "mjpeg_port_on_device": 9100,
+  "wda_port_on_device": 8100,
+  "comment": "wda_bundle_id 为空时自动检测，wda_bundle_id_pattern 用于模糊匹配"
+}

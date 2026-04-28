@@ -1,15 +1,20 @@
 """go-ios 适配器 — 支持 iOS ≥16.x 设备。
 
 通过 go-ios CLI 工具管理 WDA 服务、端口转发和设备信息获取。
+核心改进：
+- 支持 WDA bundle ID 自动检测和配置（解决 com.facebook vs com.ascript 问题）
+- 分别转发 WDA API（设备 8100）和 MJPEG 流（设备 9100）
+- 支持 relay 模式（WDA 已在运行时只做端口转发）
 """
 
 import asyncio
+import fnmatch
 import json
 import logging
 import os
 import subprocess
 
-from .base import IOSAdapterBase, WDAInfo, is_port_free, kill_process_on_port
+from .base import IOSAdapterBase, WDAInfo, load_wda_config, is_port_free, kill_process_on_port
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +27,13 @@ class GoIOSAdapter(IOSAdapterBase):
         self._ios_bin = ios_bin
         self._wda_process: subprocess.Popen | None = None
         self._tunnel_process: subprocess.Popen | None = None
+        self._mjpeg_forward_process: subprocess.Popen | None = None
         self._agent_process: subprocess.Popen | None = None
 
     async def _run_cmd(self, *args, timeout: int = 30) -> str:
         """执行 go-ios 命令并返回 stdout。"""
         cmd = [self._ios_bin] + list(args)
+        logger.debug(f"[{self.udid}] 执行: {' '.join(cmd)}")
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -36,6 +43,8 @@ class GoIOSAdapter(IOSAdapterBase):
         if proc.returncode != 0:
             raise RuntimeError(f"go-ios 命令失败: {' '.join(cmd)}\n{stderr.decode(errors='replace')}")
         return stdout.decode(errors='replace')
+
+    # ─── 设备列表 ───
 
     async def list_devices(self) -> list[dict]:
         """通过 go-ios 列出已连接的 iOS 设备。"""
@@ -48,7 +57,6 @@ class GoIOSAdapter(IOSAdapterBase):
             logger.error(f"go-ios 设备列表获取失败: {e}")
             return []
 
-        # 尝试 JSON 格式解析
         try:
             output_json = await self._run_cmd("list")
             data = json.loads(output_json)
@@ -77,35 +85,123 @@ class GoIOSAdapter(IOSAdapterBase):
             logger.error(f"[{self.udid}] WDA 安装失败: {e}")
             return False
 
-    async def start_wda(self, port: int = 8100) -> WDAInfo:
-        """启动 WDA 并建立端口转发隧道。"""
+    # ─── WDA Bundle ID 自动检测 ───
+
+    async def detect_wda_bundle_id(self) -> str:
+        """自动检测设备上已安装的 WDA bundle ID（通过 go-ios apps）。"""
+        config = load_wda_config()
+        configured = config.get("wda_bundle_id", "")
+        if configured:
+            logger.info(f"[{self.udid}] 使用配置的 WDA bundle ID: {configured}")
+            return configured
+
+        pattern = config.get("wda_bundle_id_pattern", "com.*.xctrunner")
+        try:
+            output = await self._run_cmd("apps", f"--udid={self.udid}", timeout=15)
+            apps = json.loads(output)
+            bundle_ids = []
+            if isinstance(apps, list):
+                for app in apps:
+                    bid = app.get("CFBundleIdentifier", "")
+                    if bid and fnmatch.fnmatch(bid, pattern):
+                        bundle_ids.append(bid)
+            elif isinstance(apps, dict):
+                for bid in apps:
+                    if fnmatch.fnmatch(bid, pattern):
+                        bundle_ids.append(bid)
+            if bundle_ids:
+                # 优先选择非 facebook 的（用户自定义签名的 WDA）
+                bundle_ids.sort(key=lambda x: 'facebook' in x.lower())
+                logger.info(f"[{self.udid}] go-ios 检测到 WDA: {bundle_ids[0]} (候选: {bundle_ids})")
+                return bundle_ids[0]
+            logger.warning(f"[{self.udid}] go-ios 未找到匹配 '{pattern}' 的 WDA")
+        except Exception as e:
+            logger.warning(f"[{self.udid}] go-ios WDA bundle ID 检测失败: {e}")
+        return ""
+
+    # ─── WDA 启动 ───
+
+    async def start_wda(self, port: int = 8100, mjpeg_port: int = 0) -> WDAInfo:
+        """启动 WDA 并建立端口转发隧道（含 MJPEG 端口）。"""
         await self.stop_wda()
+        config = load_wda_config()
+        mjpeg_device_port = config.get("mjpeg_port_on_device", 9100)
 
         # 确保端口空闲
         if not is_port_free(port):
-            logger.warning(f"[{self.udid}] 端口 {port} 被占用，尝试清理残留进程")
+            logger.warning(f"[{self.udid}] WDA 端口 {port} 被占用，尝试清理")
             kill_process_on_port(port)
             await asyncio.sleep(0.5)
             if not is_port_free(port):
-                raise RuntimeError(f"端口 {port} 仍被占用，无法启动 WDA")
+                raise RuntimeError(f"端口 {port} 仍被占用")
+
+        if mjpeg_port and not is_port_free(mjpeg_port):
+            logger.warning(f"[{self.udid}] MJPEG 端口 {mjpeg_port} 被占用，尝试清理")
+            kill_process_on_port(mjpeg_port)
+            await asyncio.sleep(0.3)
+
+        logger.info(f"[{self.udid}] go-ios start_wda: WDA={port}, MJPEG={mjpeg_port}, 设备MJPEG={mjpeg_device_port}")
 
         # iOS 17+ 需要先启动 tunnel agent
         await self._ensure_tunnel()
 
-        # 启动端口转发隧道
-        logger.info(f"[{self.udid}] 启动 go-ios 端口转发 {port}")
+        # 先尝试 relay 模式（WDA 已在运行）
+        if await self._try_relay_mode(port, mjpeg_port, mjpeg_device_port):
+            return self.wda_info
+
+        # WDA 未在运行，启动完整的 runwda
+        return await self._start_runwda(port, mjpeg_port, mjpeg_device_port)
+
+    async def _try_relay_mode(self, port: int, mjpeg_port: int, mjpeg_device_port: int) -> bool:
+        """尝试 relay 模式：只做端口转发，检测 WDA 是否已在运行。"""
+        logger.info(f"[{self.udid}] go-ios 尝试 relay 模式")
         self._tunnel_process = subprocess.Popen(
             [self._ios_bin, "forward", str(port), "8100", f"--udid={self.udid}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
-        # 启动 WDA
-        logger.info(f"[{self.udid}] 启动 WDA (go-ios)")
+        for attempt in range(5):
+            await asyncio.sleep(0.5)
+            if self._tunnel_process.poll() is not None:
+                logger.debug(f"[{self.udid}] go-ios forward 进程退出")
+                self._tunnel_process = None
+                return False
+
+            self.wda_info = WDAInfo(host="127.0.0.1", port=port, mjpeg_port=mjpeg_port)
+            if await self.check_wda_health():
+                logger.info(f"[{self.udid}] WDA 已在运行，relay 模式就绪 @ {port}")
+                if mjpeg_port:
+                    await self._start_mjpeg_forward(mjpeg_port, mjpeg_device_port)
+                return True
+
+        logger.debug(f"[{self.udid}] relay 模式超时，WDA 未在运行")
+        self._kill_process(self._tunnel_process)
+        self._tunnel_process = None
+        self.wda_info = None
+        return False
+
+    async def _start_runwda(self, port: int, mjpeg_port: int, mjpeg_device_port: int) -> WDAInfo:
+        """启动完整的 runwda + 端口转发。"""
+        # 检测 WDA bundle ID
+        bundle_id = await self.detect_wda_bundle_id()
+
+        # 启动 WDA API 端口转发
+        logger.info(f"[{self.udid}] 启动 go-ios 端口转发: 本地 {port} → 设备 8100")
+        self._tunnel_process = subprocess.Popen(
+            [self._ios_bin, "forward", str(port), "8100", f"--udid={self.udid}"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+        # 构建 runwda 命令（关键：传递 --bundleid）
+        wda_cmd = [self._ios_bin, "runwda", f"--udid={self.udid}"]
+        if bundle_id:
+            wda_cmd.extend([f"--bundleid={bundle_id}", f"--testbundleid={bundle_id}"])
+            logger.info(f"[{self.udid}] 启动 WDA (go-ios)，bundle ID: {bundle_id}")
+        else:
+            logger.info(f"[{self.udid}] 启动 WDA (go-ios)，使用默认 bundle ID")
+
         self._wda_process = subprocess.Popen(
-            [self._ios_bin, "runwda", f"--udid={self.udid}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            wda_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
         # 等待 WDA 就绪
@@ -114,40 +210,61 @@ class GoIOSAdapter(IOSAdapterBase):
             if self._wda_process.poll() is not None:
                 stderr = self._wda_process.stderr.read().decode(errors='replace') if self._wda_process.stderr else ""
                 await self.stop_wda()
-                raise RuntimeError(f"WDA 进程退出: {stderr}")
+                raise RuntimeError(f"WDA 进程退出: {stderr[:500]}")
 
-            self.wda_info = WDAInfo(host="127.0.0.1", port=port)
+            self.wda_info = WDAInfo(host="127.0.0.1", port=port, mjpeg_port=mjpeg_port)
             if await self.check_wda_health():
                 logger.info(f"[{self.udid}] WDA 就绪 @ {port} (go-ios)")
+                if mjpeg_port:
+                    await self._start_mjpeg_forward(mjpeg_port, mjpeg_device_port)
                 return self.wda_info
 
         await self.stop_wda()
         raise TimeoutError(f"[{self.udid}] WDA 启动超时（30s）")
 
+    async def _start_mjpeg_forward(self, mjpeg_port: int, mjpeg_device_port: int) -> None:
+        """启动 MJPEG 端口转发（设备端 9100 → 本地 mjpeg_port）。"""
+        logger.info(f"[{self.udid}] 启动 MJPEG forward: 本地 {mjpeg_port} → 设备 {mjpeg_device_port}")
+        self._mjpeg_forward_process = subprocess.Popen(
+            [self._ios_bin, "forward", str(mjpeg_port), str(mjpeg_device_port), f"--udid={self.udid}"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        await asyncio.sleep(0.5)
+        if self._mjpeg_forward_process.poll() is not None:
+            stderr = ""
+            if self._mjpeg_forward_process.stderr:
+                stderr = self._mjpeg_forward_process.stderr.read().decode(errors='replace')
+            logger.warning(f"[{self.udid}] MJPEG forward 进程立即退出: {stderr[:300]}")
+            self._mjpeg_forward_process = None
+        else:
+            logger.info(f"[{self.udid}] MJPEG forward 已启动 @ {mjpeg_port}")
+
+    def _kill_process(self, proc: subprocess.Popen | None) -> None:
+        """安全终止子进程。"""
+        if not proc:
+            return
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
     async def stop_wda(self) -> None:
         """停止 WDA、端口转发和 tunnel agent 进程。"""
-        for proc in [self._wda_process, self._tunnel_process, self._agent_process]:
-            if proc:
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=5)
-                except Exception:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
+        for proc in [self._wda_process, self._tunnel_process, self._mjpeg_forward_process, self._agent_process]:
+            self._kill_process(proc)
         self._wda_process = None
         self._tunnel_process = None
+        self._mjpeg_forward_process = None
         self._agent_process = None
         self.wda_info = None
+        logger.debug(f"[{self.udid}] go-ios 所有子进程已清理")
 
     async def _ensure_tunnel(self) -> None:
-        """确保 go-ios tunnel agent 正在运行（iOS 17+ 必需）。
-
-        go-ios 需要 `ios tunnel start` 来建立与 iOS 17+ 设备的通信隧道。
-        如果 agent 已在运行（由其他进程启动），则跳过。
-        """
-        # 先检查是否已有 agent 在运行（通过 tunnel ls 测试）
+        """确保 go-ios tunnel agent 正在运行（iOS 17+ 必需）。"""
         try:
             await self._run_cmd("tunnel", "ls", timeout=5)
             logger.debug(f"[{self.udid}] go-ios tunnel agent 已在运行")
@@ -155,15 +272,12 @@ class GoIOSAdapter(IOSAdapterBase):
         except Exception:
             pass
 
-        # 尝试多种方式启动 tunnel agent
         tunnel_cmds = [
-            # 方式 1: userspace 模式（不需要管理员权限）
             {
                 "args": [self._ios_bin, "tunnel", "start", "--userspace"],
                 "env": {**os.environ, "ENABLE_GO_IOS_AGENT": "1"},
                 "desc": "userspace 模式",
             },
-            # 方式 2: 默认模式
             {
                 "args": [self._ios_bin, "tunnel", "start"],
                 "env": {**os.environ, "ENABLE_GO_IOS_AGENT": "1"},
@@ -177,11 +291,9 @@ class GoIOSAdapter(IOSAdapterBase):
             try:
                 self._agent_process = subprocess.Popen(
                     tunnel_cfg["args"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     env=tunnel_cfg["env"],
                 )
-                # 等待 tunnel 就绪
                 for _ in range(15):
                     await asyncio.sleep(1)
                     if self._agent_process.poll() is not None:
@@ -190,7 +302,6 @@ class GoIOSAdapter(IOSAdapterBase):
                         logger.warning(f"[{self.udid}] tunnel agent ({tunnel_cfg['desc']}) 退出: {last_error}")
                         self._agent_process = None
                         break
-                    # 检查 tunnel 是否就绪
                     try:
                         await self._run_cmd("tunnel", "ls", timeout=3)
                         logger.info(f"[{self.udid}] go-ios tunnel agent 就绪 ({tunnel_cfg['desc']})")
@@ -198,7 +309,6 @@ class GoIOSAdapter(IOSAdapterBase):
                     except Exception:
                         continue
                 else:
-                    # 15 秒超时但进程还活着，再检查一次
                     try:
                         await self._run_cmd("tunnel", "ls", timeout=3)
                         logger.info(f"[{self.udid}] go-ios tunnel agent 就绪 ({tunnel_cfg['desc']})")
@@ -206,22 +316,12 @@ class GoIOSAdapter(IOSAdapterBase):
                     except Exception:
                         last_error = f"tunnel agent ({tunnel_cfg['desc']}) 15s 内未就绪"
                         logger.warning(f"[{self.udid}] {last_error}")
-                        # 清理未就绪的进程
-                        if self._agent_process:
-                            try:
-                                self._agent_process.terminate()
-                                self._agent_process.wait(timeout=3)
-                            except Exception:
-                                try:
-                                    self._agent_process.kill()
-                                except Exception:
-                                    pass
-                            self._agent_process = None
+                        self._kill_process(self._agent_process)
+                        self._agent_process = None
             except Exception as e:
                 last_error = str(e)
                 logger.warning(f"[{self.udid}] 启动 tunnel agent ({tunnel_cfg['desc']}) 失败: {e}")
 
-        # 所有方式都失败了，抛出明确错误
         raise RuntimeError(
             f"go-ios tunnel 启动失败（iOS 17+ 必需）。"
             f"请确保：1) 以管理员身份运行，或 2) go-ios 版本支持 --userspace 模式。"
@@ -245,11 +345,7 @@ class GoIOSAdapter(IOSAdapterBase):
             return {"udid": self.udid}
 
     async def install_app(self, ipa_path: str) -> tuple[bool, str]:
-        """安装 IPA 到 iOS 设备。
-
-        Returns:
-            (success, message)
-        """
+        """安装 IPA 到 iOS 设备。"""
         try:
             output = await self._run_cmd(
                 "install", f"--path={ipa_path}", f"--udid={self.udid}"
