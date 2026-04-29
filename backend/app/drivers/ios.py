@@ -163,6 +163,21 @@ class IOSDriver(AbstractDeviceDriver):
                     f"{base}{session_path}/wda/tap/0",
                     json={"x": event.params.get("x", 0), "y": event.params.get("y", 0)},
                 )
+            elif event.action == "touch":
+                action = event.params.get("action", "")
+                endpoint_map = {
+                    "down": "/wda/touch/down",
+                    "move": "/wda/touch/move",
+                    "up": "/wda/touch/up",
+                }
+                endpoint = endpoint_map.get(action)
+                if not endpoint:
+                    logger.warning("[%s] 未知 iOS 触控动作: %s", self.device_id, action)
+                    return False
+                await self._http.post(
+                    f"{base}{session_path}{endpoint}",
+                    json={"x": event.params.get("x", 0), "y": event.params.get("y", 0)},
+                )
             elif event.action == "swipe":
                 await self._http.post(
                     f"{base}{session_path}/wda/dragfromtoforduration",

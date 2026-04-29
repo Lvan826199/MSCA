@@ -183,11 +183,12 @@ async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, webs
     try:
         if cmd_type == "touch":
             action = data.get("action", "")
+            if action not in {"down", "move", "up"}:
+                await websocket.send_json({"error": f"iOS 不支持触控动作: {action}"})
+                return
             x = int(data.get("x", 0))
             y = int(data.get("y", 0))
-            # iOS 只处理 down（tap）和 move（swipe 由前端组合 down+move+up）
-            if action == "down":
-                await driver.send_event(ControlEvent("tap", {"x": x, "y": y}))
+            await driver.send_event(ControlEvent("touch", {"action": action, "x": x, "y": y}))
 
         elif cmd_type == "key":
             keycode = int(data.get("keycode", 0))

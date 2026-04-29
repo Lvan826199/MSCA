@@ -31,9 +31,8 @@
         <span class="info-label">系统版本</span>
         <span class="info-value">{{ device.platform === 'android' ? 'Android ' : 'iOS ' }}{{ device.version }}</span>
       </div>
-      <div v-if="device.resolution" class="info-row">
-        <span class="info-label">分辨率</span>
-        <span class="info-value">{{ device.resolution }}</span>
+      <div v-if="device.status === 'unavailable'" class="unavailable-tip">
+        当前设备无法连接，请联系管理员处理
       </div>
     </div>
 
@@ -154,10 +153,11 @@ const statusClass = computed(() => ({
   online: props.device.status === "online",
   mirroring: props.device.status === "mirroring",
   offline: props.device.status === "offline",
+  unavailable: props.device.status === "unavailable",
 }))
 
 const statusText = computed(() => {
-  const map = { online: "在线", mirroring: "投屏中", offline: "离线" }
+  const map = { online: "在线", mirroring: "投屏中", offline: "离线", unavailable: "不可用" }
   return map[props.device.status] || "未知"
 })
 
@@ -165,6 +165,7 @@ const statusTextClass = computed(() => ({
   "text-online": props.device.status === "online",
   "text-mirroring": props.device.status === "mirroring",
   "text-offline": props.device.status === "offline",
+  "text-unavailable": props.device.status === "unavailable",
 }))
 
 const truncatedId = computed(() => {
@@ -344,6 +345,10 @@ async function doInstall(file, signingOpts = null) {
   background: #909399;
 }
 
+.status-dot.unavailable {
+  background: #f56c6c;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
@@ -438,6 +443,20 @@ async function doInstall(file, signingOpts = null) {
 
 .text-offline {
   color: #909399;
+}
+
+.text-unavailable {
+  color: #f56c6c;
+}
+
+.unavailable-tip {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(245, 108, 108, 0.12);
+  color: #f56c6c;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .device-actions {

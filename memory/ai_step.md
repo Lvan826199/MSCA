@@ -4,6 +4,54 @@
 
 ---
 
+## 2026-04-30 — 开发计划同步 + iOS 触控序列与不可用状态
+
+### 触发背景
+
+用户要求结合开发计划、第三方项目调研报告与 `memory/ai_step.md`，先更新开发计划，再按推荐建议继续下一步开发任务并提交到本地仓库。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 文档更新 | 重写并同步当前开发进度：M1~M12 完成、M13 剩余 Electron 打包验证、P0 稳定性任务 | `doc/开发计划.md` |
+| 文档更新 | 纳入第三方调研落地策略：Liuma-agent、pymobiledevice3、Airtest、mwj-autotest-vue3 | `doc/开发计划.md` |
+| iOS 控制 | `IOSDriver.send_event()` 新增 `touch` 动作，映射 WDA `/wda/touch/down|move|up` | `backend/app/drivers/ios.py` |
+| iOS 控制 | `_handle_ios_command()` 改为完整转发前端 down/move/up，不再将 down 简化为 tap | `backend/app/websocket/control.py` |
+| 设备状态 | 新增 iOS 连续投屏失败计数，达到 3 次后标记 `unavailable` 并推送设备列表 | `backend/app/core/device_manager.py` |
+| API 处理 | 投屏启动成功清空失败计数，启动失败累计失败计数 | `backend/app/api/mirror.py` |
+| 数据模型 | 设备状态注释新增 `unavailable` | `backend/app/models/device.py` |
+| 前端提示 | 设备卡片展示 `不可用` 状态和“当前设备无法连接，请联系管理员处理”提示 | `frontend/src/components/DeviceCard.vue` |
+
+### 关键代码变更
+
+**iOS 触控序列修复：**
+- 前端已有 down→move→up 发送逻辑，本次修复后端 iOS 分支吞掉 move/up 的问题。
+- `ControlEvent("touch", {"action": action, "x": x, "y": y})` 直接映射到 WDA touch endpoint。
+- 支持 `down`、`move`、`up` 三类动作，拖拽/滑动不再退化为单次 tap。
+
+**iOS 不可用状态：**
+- `DeviceManager` 增加 `_ios_failure_counts` 与 `_ios_unavailable`。
+- 连续 3 次 iOS 投屏启动失败后，将设备状态改为 `unavailable`。
+- 投屏启动成功后清理失败计数并恢复 `online`。
+- 前端设备卡片禁用投屏/安装按钮，并展示管理员处理提示。
+
+### 验证步骤（已执行）
+
+1. **前端构建**：`npm run build` → 1028 modules transformed，构建成功。
+2. **后端语法检查**：`uv run python -m compileall backend/app` → 通过。
+3. **后端导入测试**：`uv run --project backend python -c "from backend.app.main import app; print('Import OK')"` → `Import OK`。
+4. **后端 /health 实测**：`npm run dev:backend` + 读取 `.backend-port` 请求 `/health` → `{"status":"ok"}`。
+5. **说明**：曾用根目录 uv 环境执行导入测试，因根 `pyproject.toml` 未包含 `aiohttp` 失败；改用 `--project backend` 后通过。
+
+### 待后续执行
+
+- 在真实 iOS 15.1 设备上验证拖拽、滑动、长按触控表现。
+- 执行 M13 Electron 安装包端到端验证：`npm run electron:build`。
+- 继续评估是否引入 `python-wda` 统一 WDA HTTP 封装。
+
+---
+
 ## 2026-04-29 — Bug 修复: 侧边栏样式 + 设备名称 + iOS 重复投屏
 
 ### 触发背景

@@ -11,6 +11,7 @@ from .alias_manager import alias_manager
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2.5  # 秒
+IOS_UNAVAILABLE_FAILURE_THRESHOLD = 3
 
 # iOS 版本阈值：≤15.x 用 tidevice，≥16.x 用 go-ios
 IOS_GOIOS_MIN_VERSION = 16
@@ -69,6 +70,8 @@ class DeviceManager:
         self._tidevice_available = False
         self._goios_available = False
         self._goios_bin = ""
+        self._ios_failure_counts: dict[str, int] = {}
+        self._ios_unavailable: set[str] = set()
         # 缓存已知 ADB 设备的属性（model, version, resolution），避免每次轮询都执行 shell 命令
         self._adb_device_cache: dict[str, dict] = {}
 
@@ -147,13 +150,19 @@ class DeviceManager:
                 logger.debug(f"iOS 设备扫描失败: {e}")
 
         current = android_devices + ios_devices
-        # 填充别名
+        # 填充别名和不可用状态
         for d in current:
             d.alias = alias_manager.get_alias(d.id)
+            if d.id in self._ios_unavailable:
+                d.status = "unavailable"
         current_ids = {d.id for d in current}
         old_ids = set(self._devices.keys())
 
         changed = current_ids != old_ids
+        if not changed:
+            old_status = {device_id: d.status for device_id, d in self._devices.items()}
+            new_status = {d.id: d.status for d in current}
+            changed = old_status != new_status
         if not changed:
             return
 
@@ -253,6 +262,25 @@ class DeviceManager:
                 logger.debug(f"go-ios 设备扫描失败: {e}")
 
         return devices
+
+    def mark_mirror_success(self, device_id: str) -> None:
+        if device_id not in self._devices or self._devices[device_id].platform != "ios":
+            return
+        self._ios_failure_counts.pop(device_id, None)
+        if device_id in self._ios_unavailable:
+            self._ios_unavailable.remove(device_id)
+            self._devices[device_id].status = "online"
+            asyncio.create_task(self._notify())
+
+    def mark_mirror_failure(self, device_id: str) -> None:
+        if device_id not in self._devices or self._devices[device_id].platform != "ios":
+            return
+        count = self._ios_failure_counts.get(device_id, 0) + 1
+        self._ios_failure_counts[device_id] = count
+        if count >= IOS_UNAVAILABLE_FAILURE_THRESHOLD:
+            self._ios_unavailable.add(device_id)
+            self._devices[device_id].status = "unavailable"
+            asyncio.create_task(self._notify())
 
     def create_ios_adapter(self, udid: str, version: str = ""):
         """为指定 iOS 设备创建适配器实例，根据版本自动选择。

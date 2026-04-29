@@ -14,7 +14,7 @@ class MirrorOptions:
 
 @dataclass
 class ControlEvent:
-    action: str  # tap, swipe, keyevent, text
+    action: str  # tap, touch, swipe, keyevent, text
     params: dict = None
 
     def __post_init__(self):

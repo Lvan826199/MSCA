@@ -9,5 +9,5 @@ class DeviceInfo(BaseModel):
     model: str = ""
     version: str = ""
     resolution: str = ""
-    status: str = "online"  # "online" | "offline" | "mirroring"
+    status: str = "online"  # "online" | "offline" | "mirroring" | "unavailable"
     alias: str = ""  # 后端配置的规定名称

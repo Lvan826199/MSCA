@@ -87,13 +87,17 @@ async def start_mirror(device_id: str, req: MirrorStartRequest | None = None):
             height=req.max_size,
         )
         await driver.start_mirroring(options)
+        device_manager.mark_mirror_success(device_id)
         w, h = driver.screen_size
         return {"status": "started", "device_id": device_id, "width": w, "height": h}
     except FileNotFoundError as e:
+        device_manager.mark_mirror_failure(device_id)
         raise HTTPException(status_code=500, detail=str(e)) from None
     except ConnectionError as e:
+        device_manager.mark_mirror_failure(device_id)
         raise HTTPException(status_code=502, detail=f"连接设备失败: {e}") from None
     except Exception as e:
+        device_manager.mark_mirror_failure(device_id)
         logger.error(f"启动投屏失败 [{device_id}]: {e}")
         raise HTTPException(status_code=500, detail=f"启动投屏失败: {e}") from None
 
