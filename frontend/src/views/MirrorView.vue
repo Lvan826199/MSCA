@@ -67,7 +67,7 @@
           v-for="dev in availableDevices"
           :key="dev.id"
           :value="dev.id"
-          :label="dev.model || dev.id"
+          :label="getDeviceLabel(dev)"
           style="display: block; margin-bottom: 8px;"
         />
       </el-checkbox-group>
@@ -137,6 +137,14 @@ function setPanelRef(id, el) {
   } else {
     delete panelRefs.value[id]
   }
+}
+
+function getDeviceLabel(dev) {
+  if (dev.alias) {
+    const model = dev.model || dev.id
+    return `${dev.alias}(${model})`
+  }
+  return dev.model || dev.id
 }
 
 function getDeviceName(deviceId) {

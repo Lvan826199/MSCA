@@ -4,6 +4,53 @@
 
 ---
 
+## 2026-04-29 — Bug 修复: 侧边栏样式 + 设备名称 + iOS 重复投屏
+
+### 触发背景
+
+用户反馈 5 个问题：侧边栏白色背景、添加投屏设备名称显示为 ID、iOS 15.1 停投再投报 cert_reqs 错误；要求分析 iOS 控屏方案和低版本提示方案。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| Bug 修复 | 侧边栏 `el-menu` 覆盖 CSS 变量 (`--el-menu-bg-color` 等 4 个) 解决白色背景 | `frontend/src/App.vue` |
+| Bug 修复 | 添加投屏弹窗新增 `getDeviceLabel()` 优先展示 `别名(型号)` 格式 | `frontend/src/views/MirrorView.vue` |
+| Bug 修复 | `_kill_process` → `_kill_process_tree` (Windows `taskkill /T` 杀进程树) | `backend/app/drivers/adapters/tidevice_adapter.py` |
+| Bug 修复 | 新增 `_cleanup_orphan_tidevice()` 按 UDID 清理残留进程 | 同上 |
+| Bug 修复 | `start_wda()` 添加一次自动重试 + 间隔清理机制 | 同上 |
+| 分析 | iOS 15.1 控屏方案分析（对比 csmobileagent → 定位 touch move 未处理） | 未写代码 |
+| 分析 | iOS 低版本无法连接提示方案规划（新增 `unavailable` 状态） | 未写代码 |
+
+### 关键代码变更
+
+**tidevice_adapter.py 进程清理改进：**
+- `_kill_process_tree()`: 使用 `taskkill /F /T /PID` 终止整个进程树（替代单一 `proc.terminate()`）
+- `_cleanup_orphan_tidevice()`: 通过 `wmic process where "commandline like '%UDID%'"` 匹配并强制终止残留进程
+- `stop_wda()`: 清理后额外等待 0.3s 确保资源释放
+- `start_wda()`: 首次 wdaproxy 启动失败 → `stop_wda` 彻底清理 → 等待 1s → 重试 1 次
+
+### iOS 控屏问题根因分析
+
+`control.py:_handle_ios_command()` 中 touch 处理仅响应 `action="down"`（转 tap），`move` 和 `up` 被忽略。前端发送的 down→move→up 触摸序列在 iOS 侧退化为单次 tap，拖拽/滑动手势失效。建议方案：
+1. iOS 驱动新增基于 WDA `/wda/touch/down|move|up` API 的触控方法
+2. 缓存 touch 状态实现完整手势序列
+3. 可选引入 `python-wda` 库，再调研一下`https://github.com/doronz88/pymobiledevice3` ，看下是否有可以借鉴使用的地方，
+4. 继续调研`https://github.com/AirtestProject/Airtest` ，这个项目，我们计划里面能用到，该项目有适合的地方可以借鉴过来
+5. 上面两个github项目我已经下载到了E:\Y_pythonProject\csmobileagent目录下，你直接本地探索
+### 验证步骤（已执行）
+
+1. **前端构建**：`npm run build` → 1028 modules, 2.53s, 构建成功
+2. **后端代码语法**：手动审查通过，无语法错误
+
+### 待后续执行
+
+- 后端 /health 启动测试
+- iOS 控屏方案代码实现（等待用户指令）
+- iOS 低版本 `unavailable` 状态实现（等待用户指令）
+
+---
+
 ## 2026-04-29 — 后端导入修复 & 前端树摇与懒加载
 
 ### 触发背景

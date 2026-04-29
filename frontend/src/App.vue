@@ -100,6 +100,10 @@ html, body, #app {
   flex: 1;
   border-right: none;
   background: transparent;
+  --el-menu-bg-color: transparent;
+  --el-menu-hover-bg-color: #262727;
+  --el-menu-active-color: #409eff;
+  --el-menu-text-color: #c0c4cc;
 }
 
 .app-menu .el-menu-item {

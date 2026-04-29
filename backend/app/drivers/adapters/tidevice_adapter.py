@@ -100,7 +100,7 @@ class TideviceAdapter(IOSAdapterBase):
         return ""
 
     async def start_wda(self, port: int = 8100, mjpeg_port: int = 0) -> WDAInfo:
-        """启动 WDA 代理 + MJPEG 端口转发。"""
+        """启动 WDA 代理 + MJPEG 端口转发（含重试）。"""
         await self.stop_wda()
         config = load_wda_config()
         mjpeg_device_port = config.get("mjpeg_port_on_device", 9100)
@@ -124,8 +124,28 @@ class TideviceAdapter(IOSAdapterBase):
         if await self._try_relay_mode(port, mjpeg_port, mjpeg_device_port):
             return self.wda_info
 
-        # WDA 未在运行，启动完整的 wdaproxy
-        return await self._start_wdaproxy(port, mjpeg_port, mjpeg_device_port)
+        # WDA 未在运行，启动完整的 wdaproxy（含一次重试）
+        last_error = None
+        for attempt in range(2):
+            try:
+                return await self._start_wdaproxy(port, mjpeg_port, mjpeg_device_port)
+            except (RuntimeError, TimeoutError) as e:
+                last_error = e
+                if attempt == 0:
+                    logger.warning(
+                        "[%s] wdaproxy 第 1 次启动失败: %s，清理后重试...",
+                        self.udid, e
+                    )
+                    # 彻底清理后重试
+                    await self.stop_wda()
+                    await asyncio.sleep(1)
+                    if not is_port_free(port):
+                        kill_process_on_port(port)
+                        await asyncio.sleep(0.5)
+                    if mjpeg_port and not is_port_free(mjpeg_port):
+                        kill_process_on_port(mjpeg_port)
+                        await asyncio.sleep(0.3)
+        raise last_error
 
     async def _try_relay_mode(self, port: int, mjpeg_port: int, mjpeg_device_port: int) -> bool:
         """尝试 relay 模式：端口转发到设备 8100，检测 WDA 是否已在运行。"""
@@ -201,27 +221,69 @@ class TideviceAdapter(IOSAdapterBase):
         else:
             logger.info(f"[{self.udid}] MJPEG relay 已启动 @ {mjpeg_port}")
 
-    def _kill_process(self, proc: subprocess.Popen | None) -> None:
-        """安全终止子进程。"""
+    def _kill_process_tree(self, proc: subprocess.Popen | None) -> None:
+        """安全终止子进程及其所有子进程（进程树）。"""
         if not proc:
             return
+        pid = proc.pid
         try:
-            proc.terminate()
+            # Windows: 使用 taskkill /T 杀死整个进程树
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=5,
+            )
+        except Exception:
+            pass
+        try:
             proc.wait(timeout=3)
         except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            pass
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    def _cleanup_orphan_tidevice(self) -> None:
+        """清理与此设备 UDID 相关的残留 tidevice 进程。
+
+        当 wdaproxy 被杀时，它内部启动的 xctest 子进程可能不会一起退出。
+        此方法通过命令行关键字搜索并强制终止相关进程。
+        """
+        try:
+            result = subprocess.run(
+                ["wmic", "process", "where",
+                 f"commandline like '%{self.udid}%' and name like '%tidevice%'",
+                 "get", "ProcessId"],
+                capture_output=True, timeout=10,
+            )
+            for line in result.stdout.decode(errors="replace").splitlines():
+                line = line.strip()
+                if line and line.isdigit():
+                    pid = int(line)
+                    try:
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(pid)],
+                            capture_output=True, timeout=5,
+                        )
+                        logger.debug("[%s] 清理残留 tidevice 进程 PID=%s", self.udid, pid)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     async def stop_wda(self) -> None:
-        """停止 WDA 代理和 MJPEG relay 进程。"""
-        self._kill_process(self._proxy_process)
+        """停止 WDA 代理和 MJPEG relay 进程，并清理所有残留子进程。"""
+        self._kill_process_tree(self._proxy_process)
         self._proxy_process = None
-        self._kill_process(self._mjpeg_relay_process)
+        self._kill_process_tree(self._mjpeg_relay_process)
         self._mjpeg_relay_process = None
         self.wda_info = None
-        logger.debug(f"[{self.udid}] tidevice 所有子进程已清理")
+
+        # 额外清理残留的 tidevice 子进程（如 wdaproxy 内部启动的 xctest）
+        self._cleanup_orphan_tidevice()
+        await asyncio.sleep(0.3)
+        logger.debug("[%s] tidevice 所有进程树已清理", self.udid)
 
     async def get_device_info(self) -> dict:
         """获取设备详细信息。"""
