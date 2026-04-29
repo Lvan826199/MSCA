@@ -9,10 +9,10 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.api.mirror import get_active_driver
-from app.drivers.ios import IOSDriver
-from app.drivers.base import ControlEvent
-from app.scrcpy import protocol
+from ..api.mirror import get_active_driver
+from ..drivers.base import ControlEvent
+from ..drivers.ios import IOSDriver
+from ..scrcpy import protocol
 
 logger = logging.getLogger(__name__)
 

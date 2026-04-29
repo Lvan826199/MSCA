@@ -47,6 +47,33 @@ export default defineConfig(() => {
     },
     build: {
       outDir: "dist",
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const normalized = id.replace(/\\/g, "/")
+            if (normalized.includes("/node_modules/")) {
+              if (
+                normalized.includes("/node_modules/element-plus/") ||
+                normalized.includes("/node_modules/@element-plus/") ||
+                normalized.includes("/node_modules/@popperjs/")
+              ) {
+                return "vendor-element-plus"
+              }
+              if (
+                normalized.includes("/node_modules/vue/") ||
+                normalized.includes("/node_modules/vue-router/") ||
+                normalized.includes("/node_modules/@vue/")
+              ) {
+                return "vendor-vue"
+              }
+              return "vendor"
+            }
+            if (normalized.includes("/src/composables/useVideoDecoder.js")) {
+              return "decoder-video"
+            }
+          },
+        },
+      },
     },
   }
 })

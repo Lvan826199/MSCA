@@ -14,7 +14,7 @@ import logging
 import os
 import subprocess
 
-from .base import IOSAdapterBase, WDAInfo, load_wda_config, is_port_free, kill_process_on_port
+from .base import IOSAdapterBase, WDAInfo, is_port_free, kill_process_on_port, load_wda_config
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class GoIOSAdapter(IOSAdapterBase):
     async def list_devices(self) -> list[dict]:
         """通过 go-ios 列出已连接的 iOS 设备。"""
         try:
-            output = await self._run_cmd("list", "--nojson")
+            await self._run_cmd("list", "--nojson")
         except FileNotFoundError:
             logger.warning("go-ios (ios) 未安装，无法发现 iOS 设备")
             return []
@@ -160,7 +160,7 @@ class GoIOSAdapter(IOSAdapterBase):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
-        for attempt in range(5):
+        for _attempt in range(5):
             await asyncio.sleep(0.5)
             if self._tunnel_process.poll() is not None:
                 logger.debug(f"[{self.udid}] go-ios forward 进程退出")
@@ -205,7 +205,7 @@ class GoIOSAdapter(IOSAdapterBase):
         )
 
         # 等待 WDA 就绪
-        for i in range(30):
+        for _i in range(30):
             await asyncio.sleep(1)
             if self._wda_process.poll() is not None:
                 stderr = self._wda_process.stderr.read().decode(errors='replace') if self._wda_process.stderr else ""

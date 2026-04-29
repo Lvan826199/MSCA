@@ -8,9 +8,9 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.drivers.android import AndroidDriver
-from app.drivers.base import AbstractDeviceDriver, MirrorOptions
-from app.core.device_manager import device_manager
+from ..core.device_manager import device_manager
+from ..drivers.android import AndroidDriver
+from ..drivers.base import AbstractDeviceDriver, MirrorOptions
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def get_driver(device_id: str) -> AbstractDeviceDriver:
                 break
 
         if device_info and device_info.platform == "ios":
-            from app.drivers.ios import IOSDriver
+            from ..drivers.ios import IOSDriver
             adapter = device_manager.create_ios_adapter(device_id)
             _drivers[device_id] = IOSDriver(device_id, adapter)
         else:

@@ -9,7 +9,7 @@ import os
 import socket
 import subprocess
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def load_wda_config() -> dict:
 
     if os.path.isfile(config_path):
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 data = json.load(f)
             defaults.update({k: v for k, v in data.items() if k in defaults})
             logger.info(f"WDA 配置已加载: {config_path}")

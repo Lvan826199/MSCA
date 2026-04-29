@@ -12,15 +12,12 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.api.mirror import get_active_driver
-from app.drivers.ios import IOSDriver
-from app.scrcpy.protocol import (
-    NAL_TYPE_MASK,
+from ..api.mirror import get_active_driver
+from ..drivers.ios import IOSDriver
+from ..scrcpy.protocol import (
     NAL_IDR,
-    NAL_SPS,
-    NAL_PPS,
+    NAL_TYPE_MASK,
     has_config_data,
-    is_key_frame,
 )
 
 logger = logging.getLogger(__name__)

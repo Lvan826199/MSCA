@@ -9,12 +9,11 @@ import os
 import subprocess
 import tempfile
 import zipfile
-from typing import Callable
+from collections.abc import Callable
 
 import adbutils
 
-from app.drivers.base import AbstractDeviceDriver, ControlEvent, InstallResult, MirrorOptions
-from app.scrcpy.protocol import (
+from ..scrcpy.protocol import (
     ACTION_DOWN,
     ACTION_MOVE,
     ACTION_UP,
@@ -28,7 +27,8 @@ from app.scrcpy.protocol import (
     encode_inject_text,
     encode_inject_touch,
 )
-from app.scrcpy.server_manager import ScrcpyServerManager
+from ..scrcpy.server_manager import ScrcpyServerManager
+from .base import AbstractDeviceDriver, ControlEvent, InstallResult, MirrorOptions
 
 logger = logging.getLogger(__name__)
 

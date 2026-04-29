@@ -82,13 +82,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from "vue"
+import { defineAsyncComponent, ref, computed, onMounted, onUnmounted, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { ArrowLeft, Plus } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
 import { useSettings } from "@/composables/useSettings"
 import { useDevices } from "@/composables/useDevices"
-import DeviceMirrorPanel from "@/components/DeviceMirrorPanel.vue"
+const DeviceMirrorPanel = defineAsyncComponent(() => import("@/components/DeviceMirrorPanel.vue"))
 
 const route = useRoute()
 const router = useRouter()

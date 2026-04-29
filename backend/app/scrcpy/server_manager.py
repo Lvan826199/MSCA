@@ -17,7 +17,7 @@ from pathlib import Path
 
 import adbutils
 
-from app.scrcpy import protocol
+from . import protocol
 
 logger = logging.getLogger(__name__)
 

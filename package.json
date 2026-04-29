@@ -5,23 +5,23 @@
   "private": true,
   "main": "electron/main.js",
   "scripts": {
-    "dev": "cd frontend && npm run dev",
-    "dev:backend": "cd backend && uv run python __main__.py",
-    "build": "cd frontend && npm run build",
-    "build:web": "cd frontend && npm run build && mkdir -p ../dist/web && cp -r dist/* ../dist/web/",
+    "dev": "npm --prefix frontend run dev",
+    "dev:backend": "uv run --project backend python backend/__main__.py",
+    "build": "npm --prefix frontend run build",
+    "build:web": "node scripts/build-web.mjs",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "electron:build": "npm run build && npm run backend:build && electron-builder",
-    "backend:build": "bash scripts/build-backend.sh",
-    "backend:verify": "bash scripts/verify-backend.sh",
-    "dist:clean": "rm -rf dist/",
-    "lint": "cd frontend && npm run lint",
-    "format": "cd frontend && npm run format"
+    "backend:build": "node scripts/build-backend.mjs",
+    "backend:verify": "node scripts/verify-backend.mjs",
+    "dist:clean": "node scripts/clean-dist.mjs",
+    "lint": "npm --prefix frontend run lint",
+    "format": "npm --prefix frontend run format"
   },
   "devDependencies": {
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.0",
-    "cross-env": "^7.0.3",
-    "concurrently": "^9.1.0",
     "wait-on": "^8.0.1"
   },
   "build": {

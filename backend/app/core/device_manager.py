@@ -5,8 +5,8 @@ import shutil
 
 import adbutils
 
-from app.models.device import DeviceInfo
-from app.core.alias_manager import alias_manager
+from ..models.device import DeviceInfo
+from .alias_manager import alias_manager
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +213,7 @@ class DeviceManager:
         # tidevice 扫描
         if self._tidevice_available:
             try:
-                from app.drivers.adapters.tidevice_adapter import TideviceAdapter
+                from ..drivers.adapters.tidevice_adapter import TideviceAdapter
                 adapter = TideviceAdapter(udid="")
                 for d in await adapter.list_devices():
                     udid = d.get("udid", "")
@@ -234,7 +234,7 @@ class DeviceManager:
         # go-ios 扫描（补充 tidevice 未发现的设备）
         if self._goios_available:
             try:
-                from app.drivers.adapters.goios_adapter import GoIOSAdapter
+                from ..drivers.adapters.goios_adapter import GoIOSAdapter
                 adapter = GoIOSAdapter(udid="", ios_bin=self._goios_bin)
                 for d in await adapter.list_devices():
                     udid = d.get("udid", "")
@@ -272,19 +272,19 @@ class DeviceManager:
         # iOS ≤15.x 优先 tidevice，≥16.x 优先 go-ios
         if major > 0 and major < IOS_GOIOS_MIN_VERSION:
             if self._tidevice_available:
-                from app.drivers.adapters.tidevice_adapter import TideviceAdapter
+                from ..drivers.adapters.tidevice_adapter import TideviceAdapter
                 return TideviceAdapter(udid=udid)
             elif self._goios_available:
                 logger.warning(f"[{udid}] iOS {version} 推荐 tidevice，但不可用，回退到 go-ios")
-                from app.drivers.adapters.goios_adapter import GoIOSAdapter
+                from ..drivers.adapters.goios_adapter import GoIOSAdapter
                 return GoIOSAdapter(udid=udid, ios_bin=self._goios_bin)
         else:
             if self._goios_available:
-                from app.drivers.adapters.goios_adapter import GoIOSAdapter
+                from ..drivers.adapters.goios_adapter import GoIOSAdapter
                 return GoIOSAdapter(udid=udid, ios_bin=self._goios_bin)
             elif self._tidevice_available:
                 logger.warning(f"[{udid}] iOS {version} 推荐 go-ios，但不可用，回退到 tidevice")
-                from app.drivers.adapters.tidevice_adapter import TideviceAdapter
+                from ..drivers.adapters.tidevice_adapter import TideviceAdapter
                 return TideviceAdapter(udid=udid)
 
         raise RuntimeError("iOS 支持未启用（tidevice 和 go-ios 均不可用）")

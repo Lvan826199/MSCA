@@ -1,5 +1,6 @@
 <template>
-  <el-container class="app-container">
+  <el-config-provider :locale="zhCn">
+    <el-container class="app-container">
     <el-aside width="260px" class="app-aside">
       <div class="app-logo">
         <h2>MSCA</h2>
@@ -28,13 +29,15 @@
     <el-main class="app-main">
       <router-view />
     </el-main>
-  </el-container>
+    </el-container>
+  </el-config-provider>
 </template>
 
 <script setup>
 import { computed } from "vue"
 import { useRoute } from "vue-router"
 import { Monitor, Setting } from "@element-plus/icons-vue"
+import zhCn from "element-plus/es/locale/lang/zh-cn"
 import { useWebSocket } from "@/composables/useWebSocket"
 
 const route = useRoute()

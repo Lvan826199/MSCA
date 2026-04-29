@@ -49,13 +49,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from "vue"
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue"
 import { Close, Loading } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
-import { useVideoDecoder } from "@/composables/useVideoDecoder"
 import { useDeviceControl } from "@/composables/useDeviceControl"
 import { useSettings } from "@/composables/useSettings"
-import DeviceControlBar from "./DeviceControlBar.vue"
+
+const DeviceControlBar = defineAsyncComponent(() => import("./DeviceControlBar.vue"))
 
 const props = defineProps({
   deviceId: { type: String, required: true },
@@ -81,15 +81,11 @@ const errorMsg = ref("")
 const canvasEl = ref(null)
 const isFullscreen = ref(false)
 
-const {
-  connected,
-  videoWidth,
-  videoHeight,
-  fps,
-  error: decoderError,
-  start: startDecoder,
-  stop: stopDecoder,
-} = useVideoDecoder(props.deviceId)
+const decoderRef = shallowRef(null)
+const videoWidth = computed(() => decoderRef.value?.videoWidth.value ?? 0)
+const videoHeight = computed(() => decoderRef.value?.videoHeight.value ?? 0)
+const fps = computed(() => decoderRef.value?.fps.value ?? 0)
+const decoderError = computed(() => decoderRef.value?.error.value ?? null)
 
 const control = useDeviceControl(props.deviceId)
 
@@ -99,6 +95,18 @@ const { getMirrorOptions } = useSettings()
 function getApiBase() {
   const { getBackendUrl } = useConnection()
   return getBackendUrl()
+}
+
+async function ensureDecoder() {
+  if (!decoderRef.value) {
+    const { useVideoDecoder } = await import("@/composables/useVideoDecoder")
+    decoderRef.value = useVideoDecoder(props.deviceId)
+  }
+  return decoderRef.value
+}
+
+function stopDecoder() {
+  decoderRef.value?.stop()
 }
 
 async function startMirror() {
@@ -139,7 +147,8 @@ async function startMirror() {
       retries++
     }
     if (canvasEl.value) {
-      startDecoder(canvasEl.value)
+      const decoder = await ensureDecoder()
+      decoder.start(canvasEl.value)
     }
   } catch (e) {
     starting.value = false
@@ -165,11 +174,6 @@ async function stopMirror() {
 
 function toggleFullscreen() {
   isFullscreen.value = !isFullscreen.value
-}
-
-function sendRecents() {
-  // Android KEYCODE_APP_SWITCH = 187
-  control.send({ type: "key", action: "down", keycode: 187 })
 }
 
 /**

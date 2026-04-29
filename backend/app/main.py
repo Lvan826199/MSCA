@@ -3,16 +3,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.devices import router as devices_router
-from app.api.health import router as health_router
-from app.api.install import router as install_router
-from app.api.mirror import router as mirror_router
-from app.core.device_manager import device_manager
-from app.core.alias_manager import alias_manager
-from app.websocket.devices import router as ws_devices_router
-from app.websocket.handler import router as ws_router
-from app.websocket.video import router as ws_video_router
-from app.websocket.control import router as ws_control_router
+from .api.devices import router as devices_router
+from .api.health import router as health_router
+from .api.install import router as install_router
+from .api.mirror import router as mirror_router
+from .core.alias_manager import alias_manager
+from .core.device_manager import device_manager
+from .websocket.control import router as ws_control_router
+from .websocket.devices import router as ws_devices_router
+from .websocket.handler import router as ws_router
+from .websocket.video import router as ws_video_router
 
 
 @asynccontextmanager

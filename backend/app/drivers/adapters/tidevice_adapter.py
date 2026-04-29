@@ -11,7 +11,7 @@ import fnmatch
 import logging
 import subprocess
 
-from .base import IOSAdapterBase, WDAInfo, load_wda_config, is_port_free, kill_process_on_port
+from .base import IOSAdapterBase, WDAInfo, is_port_free, kill_process_on_port, load_wda_config
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ class TideviceAdapter(IOSAdapterBase):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
-        for attempt in range(5):
+        for _attempt in range(5):
             await asyncio.sleep(0.5)
             if self._proxy_process.poll() is not None:
                 logger.debug(f"[{self.udid}] relay 进程退出，WDA 可能未在运行")
@@ -169,7 +169,7 @@ class TideviceAdapter(IOSAdapterBase):
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
-        for i in range(30):
+        for _i in range(30):
             await asyncio.sleep(1)
             if self._proxy_process.poll() is not None:
                 stderr = self._proxy_process.stderr.read().decode(errors='replace') if self._proxy_process.stderr else ""

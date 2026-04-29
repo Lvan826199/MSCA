@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.core.device_manager import device_manager
+from ..core.device_manager import device_manager
 
 router = APIRouter()
 
