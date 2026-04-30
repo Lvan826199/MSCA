@@ -4,6 +4,57 @@
 
 ---
 
+## 2026-04-30 — 文档同步 + 代码审查与 M13 后端打包验证
+
+### 触发背景
+
+用户要求同步所有文档，校验当前项目所有代码，执行 code review 与 UI/交互易用性分析，并根据文档继续下一步开发任务直到完成后提交本地仓库。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 文档同步 | 统一当前架构说明，移除旧 Electron 直连 scrcpy GUI 表述，补充 M13 打包验证状态 | `README.md`, `CLAUDE.md`, `doc/*.md`, `bin/README.md`, `dist/README.md` |
+| 代码审查 | 审查后端资源路径、Electron 后端启动、前端连接与设备状态展示 | `backend/app/`, `electron/backend-manager.js`, `frontend/src/` |
+| 易用性分析 | 梳理设备列表、连接状态、投屏页面、同步模式、移动端适配等 UI/交互改进点 | `frontend/src/views/*`, `frontend/src/components/*` |
+| Android 资源路径 | `bundletool.jar` 与 `aab_keys` 支持 `MSCA_RESOURCES_PATH/bin/android` | `backend/app/drivers/android.py` |
+| 后端构建 | Nuitka 改为 standalone 目录产物，自动同意依赖下载，复制完整运行时目录 | `scripts/build-backend.mjs` |
+| 后端验证 | 验证脚本检查 Electron 资源、从 runtime 目录启动 exe、传入 `MSCA_RESOURCES_PATH` 并等待进程退出 | `scripts/verify-backend.mjs` |
+| Electron 启动 | 生产模式后端路径改为 `resources/msca-backend/msca-backend.exe`，并设置 cwd/PATH 到 runtime 目录 | `electron/backend-manager.js` |
+
+### 关键代码变更
+
+**M13 standalone 后端运行时修复：**
+- 不再把 Nuitka standalone exe 单独复制到 `dist/backend/msca-backend.exe` 运行。
+- 完整复制 `.dist` 运行时目录到 `dist/backend/msca-backend/` 与 `resources/msca-backend/`。
+- `backend:verify` 优先启动 `dist/backend/msca-backend/msca-backend.exe`，避免缺少 `python313.dll` 或运行路径错误。
+- Electron 生产路径同步指向 `resources/msca-backend/msca-backend.exe`，并将 runtime 目录加入 `PATH`。
+
+**资源验证增强：**
+- 校验 `resources/msca-backend/msca-backend.exe`。
+- 校验 `bin/android/scrcpy-server`、`scrcpy-server.version`、`bundletool.jar`。
+- 校验 `bin/ios/ios.exe`。
+- 后端启动时设置 `MSCA_RESOURCES_PATH`，模拟 Electron 生产资源路径。
+
+### 验证步骤（已执行）
+
+1. **脚本语法检查**：`node --check scripts/build-backend.mjs` → 通过。
+2. **脚本语法检查**：`node --check scripts/verify-backend.mjs` → 通过。
+3. **脚本语法检查**：`node --check electron/backend-manager.js` → 通过。
+4. **后端打包构建**：`npm run backend:build` → Nuitka standalone 构建成功，产物位于 `dist/backend/msca-backend/msca-backend.exe`。
+5. **后端打包验证**：`npm run backend:verify` → `/health` 返回 `{"status":"ok"}`，`/api/devices` 返回 200，验证通过。
+6. **前端构建**：`npm run build` → 1028 modules transformed，构建成功。
+7. **后端语法检查**：`uv run --project backend python -m py_compile backend/app/drivers/android.py backend/app/core/device_manager.py backend/app/scrcpy/server_manager.py` → 通过。
+8. **后端导入测试**：`uv run --project backend python -c "import sys; sys.path.insert(0, 'backend'); from app.main import app; from app.drivers.android import AndroidDriver; print('Import OK')"` → `Import OK`。
+
+### 待后续执行
+
+- 最终发布前执行 `npm run electron:build`，验证安装包端到端启动内嵌后端。
+- 根据本轮 UI/交互分析继续优化设备列表加载/错误态、连接模式设置、同步模式风险提示与窄屏投屏布局。
+- 在真实 Android/iOS 设备上回归资源路径、AAB 安装、投屏和控制链路。
+
+---
+
 ## 2026-04-30 — 开发计划同步 + iOS 触控序列与不可用状态
 
 ### 触发背景

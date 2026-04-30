@@ -61,4 +61,11 @@ bin/android/aab_keys/avidly_signature
 bin/android/aab_keys/install_aab.bat
 
 # iOS 配对凭证（敏感信息，禁止提交）
+selfIdentity.plist
 backend/selfIdentity.plist
+
+# Nuitka 临时产物
+backend/__main__.dist/
+backend/nuitka-crash-report.xml
+resources/msca-backend.exe
+resources/msca-backend/

@@ -18,6 +18,8 @@ dependencies = [
 # 可选开发依赖（按需手动安装，不写入锁文件）
 [dependency-groups]
 dev = [
+    "nuitka>=4.0.8",
+    "ordered-set>=4.1.0",
     "ruff>=0.8.0",
 ]
 

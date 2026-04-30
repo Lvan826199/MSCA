@@ -311,11 +311,19 @@ class AndroidDriver(AbstractDeviceDriver):
         return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
     @staticmethod
+    def _get_android_bin_dir() -> str:
+        """获取 Android 内置工具目录。"""
+        res_path = os.environ.get("MSCA_RESOURCES_PATH", "")
+        if res_path:
+            packaged_dir = os.path.join(res_path, "bin", "android")
+            if os.path.isdir(packaged_dir):
+                return packaged_dir
+        return os.path.join(AndroidDriver._get_project_root(), "bin", "android")
+
+    @staticmethod
     def _find_bundletool() -> str | None:
-        """查找 bundletool.jar 路径。优先级：bin/android/ > 环境变量 BUNDLETOOL_PATH。"""
-        # 项目内置路径
-        project_root = AndroidDriver._get_project_root()
-        builtin = os.path.join(project_root, "bin", "android", "bundletool.jar")
+        """查找 bundletool.jar 路径。优先级：MSCA_RESOURCES_PATH > bin/android/ > BUNDLETOOL_PATH。"""
+        builtin = os.path.join(AndroidDriver._get_android_bin_dir(), "bundletool.jar")
         if os.path.isfile(builtin):
             return builtin
 
@@ -332,9 +340,7 @@ class AndroidDriver(AbstractDeviceDriver):
 
         返回格式: [{"name": "xxx.keystore", "path": "绝对路径"}, ...]
         """
-        keys_dir = os.path.join(
-            AndroidDriver._get_project_root(), "bin", "android", "aab_keys"
-        )
+        keys_dir = os.path.join(AndroidDriver._get_android_bin_dir(), "aab_keys")
         if not os.path.isdir(keys_dir):
             return []
 

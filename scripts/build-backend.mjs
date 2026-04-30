@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs"
 import path from "node:path"
 import { spawn } from "node:child_process"
 
@@ -32,6 +32,10 @@ async function ensureNuitka() {
 console.log("[build] 开始编译后端...")
 await ensureNuitka()
 
+const buildDir = path.join(backendDir, "build", "nuitka")
+rmSync(buildDir, { recursive: true, force: true })
+mkdirSync(buildDir, { recursive: true })
+
 await run(
   "uv",
   [
@@ -40,7 +44,8 @@ await run(
     "-m",
     "nuitka",
     "--standalone",
-    "--onefile",
+    "--assume-yes-for-downloads",
+    "--output-dir=build/nuitka",
     "--output-filename=msca-backend.exe",
     "--include-package=app",
     "--include-package=uvicorn",
@@ -54,17 +59,32 @@ await run(
 mkdirSync(distDir, { recursive: true })
 mkdirSync(resourcesDir, { recursive: true })
 
-const backendExe = path.join(backendDir, "msca-backend.exe")
-const fallbackExe = path.join(backendDir, "__main__.exe")
-const outputExe = path.join(distDir, "msca-backend.exe")
+const backendExe = process.platform === "win32"
+  ? path.join(buildDir, "msca-backend.dist", "msca-backend.exe")
+  : path.join(buildDir, "msca-backend.dist", "msca-backend")
+const fallbackExe = process.platform === "win32"
+  ? path.join(buildDir, "__main__.dist", "msca-backend.exe")
+  : path.join(buildDir, "__main__.dist", "msca-backend")
+const distRuntimeDir = path.join(distDir, "msca-backend")
+const resourceRuntimeDir = path.join(resourcesDir, "msca-backend")
+const sourceRuntimeDir = existsSync(path.join(buildDir, "msca-backend.dist"))
+  ? path.join(buildDir, "msca-backend.dist")
+  : path.join(buildDir, "__main__.dist")
+const outputExe = path.join(distRuntimeDir, process.platform === "win32" ? "msca-backend.exe" : "msca-backend")
+const resourceExe = path.join(resourceRuntimeDir, process.platform === "win32" ? "msca-backend.exe" : "msca-backend")
 const sourceExe = existsSync(backendExe) ? backendExe : fallbackExe
 
 if (!existsSync(sourceExe)) {
   throw new Error("未找到编译产物 msca-backend.exe")
 }
 
-rmSync(outputExe, { force: true })
-copyFileSync(sourceExe, outputExe)
-copyFileSync(outputExe, path.join(resourcesDir, "msca-backend.exe"))
+rmSync(distRuntimeDir, { recursive: true, force: true })
+rmSync(resourceRuntimeDir, { recursive: true, force: true })
+cpSync(sourceRuntimeDir, distRuntimeDir, { recursive: true })
+cpSync(sourceRuntimeDir, resourceRuntimeDir, { recursive: true })
+
+if (!existsSync(outputExe) || !existsSync(resourceExe)) {
+  throw new Error("后端运行时目录复制不完整")
+}
 
 console.log(`[build] 后端编译完成 -> ${outputExe}`)

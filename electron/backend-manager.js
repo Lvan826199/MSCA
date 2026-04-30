@@ -78,7 +78,7 @@ class BackendManager {
     if (isDev) return process.platform === "win32" ? "uv" : "uv"
     const res = process.resourcesPath || path.join(__dirname, "..")
     const exe = process.platform === "win32" ? "msca-backend.exe" : "msca-backend"
-    return path.join(res, "resources", exe)
+    return path.join(res, "resources", "msca-backend", exe)
   }
 
   async _spawn() {
@@ -91,12 +91,15 @@ class BackendManager {
       opts = { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, cwd: path.join(__dirname, "..", "backend") }
     } else {
       const resPath = process.resourcesPath || path.join(__dirname, "..")
+      const backendRuntimeDir = path.join(resPath, "resources", "msca-backend")
       args = ["--port", String(this._port)]
       opts = {
+        cwd: backendRuntimeDir,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
         env: {
           ...process.env,
+          PATH: `${backendRuntimeDir}${path.delimiter}${process.env.PATH || ""}`,
           MSCA_RESOURCES_PATH: resPath,
         },
       }
