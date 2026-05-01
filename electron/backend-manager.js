@@ -11,11 +11,12 @@ const MAX_RESTART_ATTEMPTS = 3
 const RESTART_DELAYS = [0, 3000, 5000]
 
 class BackendManager {
-  constructor() {
+  constructor(isPackaged = false) {
     this._process = null
     this._port = DEFAULT_PORT
     this._restartCount = 0
     this._stopping = false
+    this._isPackaged = isPackaged
   }
 
   get port() {
@@ -74,7 +75,7 @@ class BackendManager {
   }
 
   _getBackendPath() {
-    const isDev = process.env.NODE_ENV !== "production"
+    const isDev = !this._isPackaged
     if (isDev) return process.platform === "win32" ? "uv" : "uv"
     const res = process.resourcesPath || path.join(__dirname, "..")
     const exe = process.platform === "win32" ? "msca-backend.exe" : "msca-backend"
@@ -82,7 +83,7 @@ class BackendManager {
   }
 
   async _spawn() {
-    const isDev = process.env.NODE_ENV !== "production"
+    const isDev = !this._isPackaged
     const cmd = this._getBackendPath()
     let args, opts
     if (isDev) {

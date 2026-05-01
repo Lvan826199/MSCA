@@ -4,6 +4,47 @@
 
 ---
 
+## 2026-05-01 — Electron 打包产物启动修复 + 内嵌后端验证
+
+### 触发背景
+
+打包后的 `dist/electron/win-unpacked/MSCA.exe` 启动日志显示后端健康检查超时，并错误尝试加载 `http://localhost:5173/`。用户确认此前 Web 端校验可正常投屏，要求继续任务；若再次失败先记录，并优先完成全部开发任务。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| Electron 模式识别 | 主进程改用 `app.isPackaged` 判断开发/打包模式，避免打包产物误连 Vite 开发服务 | `electron/main.js` |
+| 后端启动模式 | `BackendManager` 接收 `isPackaged` 参数，生产模式启动内嵌 `msca-backend.exe`，不再依赖 `NODE_ENV` | `electron/backend-manager.js` |
+| 打包验证 | 重新执行完整 Electron 打包，生成安装包与 unpacked 可执行文件 | `package.json`, `dist/electron/*` |
+| 运行验证 | 启动 `dist/electron/win-unpacked/MSCA.exe`，验证内嵌后端 `/health` 与 `/api/devices` | Electron 打包产物 |
+| iOS 15.1 记录 | 使用打包产物内嵌后端启动 iOS 15.1 投屏接口，返回 started，并随后停止会话 | 后端运行时 |
+
+### 关键代码变更
+
+- `electron/main.js`：`isDev` 从 `process.env.NODE_ENV !== "production"` 改为 `!app.isPackaged`。
+- `electron/main.js`：创建 `BackendManager(app.isPackaged)`，将打包状态传入后端管理器。
+- `electron/backend-manager.js`：构造函数新增 `isPackaged` 参数，并在 `_getBackendPath()` / `_spawn()` 中使用 `!this._isPackaged` 判断开发模式。
+
+### 验证步骤（已执行）
+
+1. **Electron 打包验证**：`npm run electron:build` → 通过，重新生成 `dist/electron/MSCA Setup 0.1.0.exe` 与 `dist/electron/win-unpacked/MSCA.exe`。
+2. **打包产物启动验证**：启动 `dist/electron/win-unpacked/MSCA.exe` → 日志显示内嵌后端在 `127.0.0.1:18000` 启动，主进程输出“后端已启动，端口 18000”。
+3. **内嵌后端健康检查**：`GET http://127.0.0.1:18000/health` → `{"status":"ok"}`。
+4. **设备接口验证**：`GET http://127.0.0.1:18000/api/devices` → 200，返回 Android 与 iOS 设备列表。
+5. **iOS 15.1 投屏接口记录**：`POST /api/mirror/00008101-001859DE1E38001E/start` → `{"status":"started","device_id":"00008101-001859DE1E38001E","width":428,"height":926}`；随后执行 stop → `{"status":"stopped"}`。
+
+### 后续注意
+
+- 本轮验证确认打包产物不再尝试加载 `http://localhost:5173/`，内嵌后端可正常启动。
+- iOS 15.1 本次通过接口启动投屏，仍建议在桌面 UI 中回归点击、拖拽、滑动、长按与按键控制表现。
+
+### 最终提交 hash
+
+- 当前尚未提交，本轮变更待提交后回填。
+
+---
+
 ## 2026-04-30 — iOS 15.1 控屏稳定性增强 + 完整发布验证 + Electron 打包通过
 
 ### 触发背景

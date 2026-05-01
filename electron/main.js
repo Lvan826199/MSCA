@@ -2,8 +2,8 @@ const { app, BrowserWindow, ipcMain } = require("electron")
 const path = require("path")
 const BackendManager = require("./backend-manager")
 
-const isDev = process.env.NODE_ENV !== "production"
-const backendManager = new BackendManager()
+const isDev = !app.isPackaged
+const backendManager = new BackendManager(app.isPackaged)
 
 function createWindow() {
   const win = new BrowserWindow({
