@@ -4,7 +4,44 @@
 
 ---
 
-## 2026-05-01 — Electron 完整打包与打包产物运行回归
+## 2026-05-01 — iOS 15.1 桌面拖拽控制链路修复
+
+### 触发背景
+
+用户要求直接继续下一步任务，不再等待确认；当前发布前回归任务 N1 聚焦 iOS 15.1 桌面 UI 控制可用性。排查发现前端鼠标拖拽会发送 `touch down` 与 `touch move`，但释放时统一发送 `tap`，对 iOS WDA 来说会破坏拖拽/滑动的 `down → move → up` 序列。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 控制链路修复 | 鼠标移动加入 3 像素阈值，区分点击与拖拽 | `frontend/src/composables/useDeviceControl.js` |
+| iOS 拖拽释放 | 鼠标拖拽释放时发送 `touch up`，普通点击仍发送 `tap` | `frontend/src/composables/useDeviceControl.js` |
+| 构建验证 | 执行前端生产构建，确认改动无构建错误 | `frontend/dist/` |
+| 后端健康检查 | 启动开发后端并请求 `/health` | `.backend-port` |
+| 计划同步 | 更新 N1 回归状态说明与后续验证重点 | `doc/下一步计划.md` |
+
+### 验证步骤（已执行）
+
+1. **前端构建验证**：`npm run build` → 通过，1028 modules transformed，构建成功。
+2. **后端健康检查**：`npm run dev:backend` 后读取 `.backend-port` 为 `18000`，`GET http://127.0.0.1:18000/health` → `{"status":"ok"}`。
+3. **代码差异检查**：确认 `useDeviceControl.js` 仅调整鼠标拖拽释放序列，未改动后端 WDA REST 映射。
+
+### 发现与处理
+
+- 普通点击继续使用 `tap`，保留 iOS 点击成功率更高的 WDA tap 路径。
+- 拖拽/滑动释放改为 `touch up`，与后端 `control.py` 和 `IOSDriver.send_event()` 已支持的 WDA `/wda/touch/up` 对齐。
+- 真实 iOS 15.1 设备的长按、Home、锁屏、音量键仍需继续做 UI 回归；本轮完成代码链路修复与基础构建/健康检查。
+
+### 后续建议
+
+- 继续执行 N1 真实设备回归：点击、拖拽、滑动、长按、Home、锁屏、音量键。
+- 若真实设备仍存在手势差异，下一步补充长按定时器或 W3C Actions 手势封装评估。
+- 随后继续 N2：安装 `dist/electron/MSCA Setup 0.1.0.exe` 后做安装环境端到端验证。
+
+### 最终提交 hash
+
+- 当前尚未提交，本轮代码与文档变更待提交。
+
 
 ### 触发背景
 
@@ -40,7 +77,7 @@
 
 ### 最终提交 hash
 
-- 当前尚未提交，本轮验证记录待提交。
+- `8b3d70f` docs(ai): 记录 Electron 打包产物运行回归
 
 ---
 

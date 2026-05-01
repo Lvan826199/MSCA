@@ -236,6 +236,7 @@ export function useDeviceControl(deviceId) {
   let _rafId = null
   let _documentMouseUpHandler = null
   let _lastDownPos = null
+  const MOUSE_MOVE_THRESHOLD = 3
 
   function _emitSync(cmd) {
     if (_isSyncReceiving || !_onSyncEvent || !videoWidth || !videoHeight) return
@@ -278,7 +279,11 @@ export function useDeviceControl(deviceId) {
     if (!mouseDown) return
     const pos = canvasToDevice(e.clientX, e.clientY)
     if (pos) {
-      mouseMoved = true
+      if (_lastDownPos) {
+        const dx = pos.x - _lastDownPos.x
+        const dy = pos.y - _lastDownPos.y
+        mouseMoved = mouseMoved || Math.hypot(dx, dy) >= MOUSE_MOVE_THRESHOLD
+      }
       _pendingMove = { type: "touch", action: "move", ...pos }
       if (!_rafId) _rafId = requestAnimationFrame(_flushMove)
     }
@@ -296,7 +301,9 @@ export function useDeviceControl(deviceId) {
     if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
     const pos = canvasToDevice(e.clientX, e.clientY) || _lastDownPos
     if (pos) {
-      const cmd = { type: "tap", ...pos }
+      const cmd = mouseMoved
+        ? { type: "touch", action: "up", ...pos }
+        : { type: "tap", ...pos }
       send(cmd)
       _emitSync(cmd)
     }
