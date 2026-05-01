@@ -4,6 +4,50 @@
 
 ---
 
+## 2026-05-01 — Windows 安装包安装环境端到端验证
+
+### 触发背景
+
+用户要求继续下一步任务且不再等待确认；在完成 iOS 15.1 桌面拖拽控制链路修复并提交推送后，按 `doc/下一步计划.md` 执行 N2：验证 Electron 安装包在真实安装目录下的端到端启动、内嵌后端和 Android/iOS 投屏链路。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 代码提交 | 提交并推送 iOS 拖拽释放触控序列修复 | `frontend/src/composables/useDeviceControl.js`, `doc/下一步计划.md`, `memory/ai_step.md` |
+| 安装包验证 | 静默运行 Electron 安装包并生成真实安装目录 | `dist/electron/MSCA Setup 0.1.0.exe` |
+| 安装版启动 | 启动安装目录下桌面端程序 | `C:\Users\Gamehaus\AppData\Local\Programs\MSCA\MSCA.exe` |
+| 内嵌后端验证 | 读取安装目录资源端口文件并请求 `/health`、`/api/devices` | `C:\Users\Gamehaus\AppData\Local\Programs\MSCA\resources\resources\.backend-port` |
+| 投屏接口验证 | 分别验证 iOS 15.1 与 Android 设备 start/stop 接口 | 安装版内嵌后端 |
+| 计划同步 | 更新 N2 安装环境验证状态和后续 N3 重点 | `doc/下一步计划.md`, `memory/ai_step.md` |
+
+### 验证步骤（已执行）
+
+1. **提交与推送**：`a459caa` fix(ios): 修复桌面拖拽释放触控序列；`cbadb32` docs(ai): 回填 iOS 拖拽修复提交记录，均已推送到 `master`。
+2. **安装包安装**：执行 `dist/electron/MSCA Setup 0.1.0.exe /S` → 生成安装目录 `C:\Users\Gamehaus\AppData\Local\Programs\MSCA\`。
+3. **安装版启动**：启动 `C:\Users\Gamehaus\AppData\Local\Programs\MSCA\MSCA.exe` → 安装版内嵌后端写入端口 `18002`。
+4. **健康检查**：`GET http://127.0.0.1:18002/health` → `{"status":"ok"}`。
+5. **设备接口验证**：`GET http://127.0.0.1:18002/api/devices` → 200，返回 2 台 Android 与 7 台 iOS 在线设备。
+6. **iOS 15.1 投屏接口验证**：`POST /api/mirror/00008101-001859DE1E38001E/start` → `started`，尺寸 `428x926`；随后 stop → `stopped`。
+7. **Android 投屏接口验证**：`POST /api/mirror/BH9504LNDQ/start` → `started`，尺寸 `1440x2880`；随后 stop → `stopped`。
+
+### 发现与处理
+
+- 安装版真实资源路径可用，内嵌后端位于 `C:\Users\Gamehaus\AppData\Local\Programs\MSCA\resources\resources\msca-backend\msca-backend.exe`。
+- 安装版端口自动探测到 `18002`，说明动态端口与 `.backend-port` 读取链路在安装环境正常。
+- 安装目录中仍存在 `resources\resources\msca-backend.exe` 兼容残留文件，同时 standalone 目录 `resources\resources\msca-backend\msca-backend.exe` 存在且本轮验证正常；暂不影响运行，后续如需精简安装包可单独清理构建脚本残留复制逻辑。
+
+### 后续建议
+
+- 继续执行 N3：Android+iOS 混合投屏稳定性压测，重点观察长时间运行、停止释放、进程、端口、WebSocket 与内存表现。
+- 若稳定性压测发现 WDA 或 scrcpy 停止释放不完整，再进入 N4 补齐排障日志和用户提示。
+
+### 最终提交 hash
+
+- 当前尚未提交，本轮 N2 验证文档变更待提交。
+
+---
+
 ## 2026-05-01 — iOS 15.1 桌面拖拽控制链路修复
 
 ### 触发背景
