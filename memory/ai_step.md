@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-05-01 — Electron 完整打包与打包产物运行回归
+
+### 触发背景
+
+用户要求同步文档、推送代码后继续下一步任务；当前下一步为发布前回归中的 Electron 完整打包与桌面端打包产物运行验证。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| Electron 完整打包 | 执行 `npm run electron:build`，重新构建前端、standalone 后端与 Electron 安装包 | `frontend/dist/`, `dist/backend/msca-backend/`, `dist/electron/` |
+| 打包产物启动 | 启动 `dist/electron/win-unpacked/MSCA.exe`，验证主进程可拉起内嵌后端 | `dist/electron/win-unpacked/MSCA.exe` |
+| 内嵌后端验证 | 读取打包资源目录 `.backend-port`，并请求 `/health` 与 `/api/devices` | `dist/electron/win-unpacked/resources/resources/.backend-port` |
+| 记录追溯 | 记录本轮 Electron 打包验证与运行结果 | `memory/ai_step.md` |
+
+### 验证步骤（已执行）
+
+1. **Electron 完整打包**：`npm run electron:build` → 通过，生成 `dist/electron/MSCA Setup 0.1.0.exe` 与 `dist/electron/win-unpacked/MSCA.exe`。
+2. **打包产物启动**：启动 `dist/electron/win-unpacked/MSCA.exe` → 后端进程启动，主进程输出“后端已启动，端口 18000”。
+3. **端口文件验证**：读取 `dist/electron/win-unpacked/resources/resources/.backend-port` → `18000`。
+4. **健康检查**：`GET http://127.0.0.1:18000/health` → `{"status":"ok"}`。
+5. **设备接口验证**：`GET http://127.0.0.1:18000/api/devices` → 200，返回 2 台 Android 与 7 台 iOS 在线设备。
+
+### 发现与处理
+
+- 本轮确认打包产物启动后可正常拉起内嵌后端，且设备接口可用。
+- 打包产物日志中中文内容仍存在终端编码乱码，但不影响后端启动、健康检查或设备接口；如后续发布需要改善可单独处理日志编码显示。
+- 桌面端白屏根因已在上一轮通过 Vite `base: "./"` 修复，本轮完整打包后继续沿用相对资源路径。
+
+### 后续建议
+
+- 继续执行 N1：在桌面 UI 中对 iOS 15.1 做点击、拖拽、滑动、长按、Home、锁屏和音量键控制回归。
+- 继续执行 N2：安装 `dist/electron/MSCA Setup 0.1.0.exe` 后验证真实安装目录下的端到端启动、投屏和停止流程。
+
+### 最终提交 hash
+
+- 当前尚未提交，本轮验证记录待提交。
+
+---
+
 ## 2026-05-01 — 桌面端空白内容修复与文档残留路径校正
 
 ### 触发背景
