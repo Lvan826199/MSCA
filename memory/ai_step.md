@@ -4,6 +4,83 @@
 
 ---
 
+## 2026-05-01 — 桌面端空白内容修复与文档残留路径校正
+
+### 触发背景
+
+用户要求继续执行下一步开发任务，无需再次确认，并优先修复桌面端程序不显示内容的问题；完成后同步 `memory/ai_step.md`，并校验是否存在其他明显 bug。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 桌面端白屏修复 | Vite 生产构建新增相对资源基准路径，避免 Electron `file://` 加载 `index.html` 时访问 `/assets/*` 绝对路径导致 JS/CSS 加载失败 | `frontend/vite.config.js` |
+| 构建验证 | 重新执行前端生产构建，并确认生成的 `frontend/dist/index.html` 已使用 `./assets/*` 相对资源路径 | `frontend/dist/index.html` |
+| 后端验证 | 执行后端打包产物验证，确认 `/health` 与 `/api/devices` 正常 | `dist/backend/msca-backend/` |
+| Bug 扫描 | 搜索过期打包产物名称、旧 standalone 单 exe 路径与绝对 `/assets/` 引用 | 项目文档与构建产物 |
+| 文档修正 | 修正文档中残留的 `MSCA-Setup.exe`、`resources/msca-backend.exe`、旧构建产物表述 | `doc/下一步计划.md`, `doc/项目需求及技术栈概览.md` |
+| 记录追溯 | 记录本轮桌面端白屏修复、验证结果与残留问题 | `memory/ai_step.md` |
+
+### 关键代码变更
+
+- `frontend/vite.config.js`：在 Vite 配置中新增 `base: "./"`。
+- 修复前构建产物引用形如 `src="/assets/index-*.js"`，Electron 打包后通过 `file://` 打开会解析到错误根路径，导致窗口内容为空。
+- 修复后构建产物引用形如 `src="./assets/index-*.js"`，可随 `index.html` 相对路径加载。
+
+### 验证步骤（已执行）
+
+1. **前端构建验证**：`npm run build` → 通过，1028 modules transformed，构建成功。
+2. **资源路径验证**：读取 `frontend/dist/index.html` → JS/CSS/modulepreload 均为 `./assets/...` 相对路径。
+3. **后端打包验证**：`npm run backend:verify` → `/health` 返回 `{"status":"ok"}`，`/api/devices` 返回 200，后端打包验证通过。
+4. **过期路径扫描**：搜索 `MSCA-Setup`、`dist/backend/msca-backend.exe`、`resources/msca-backend.exe`、`src="/assets/`、`href="/assets/` → 仅保留历史操作记录中的旧路径说明，当前文档与构建产物已修正。
+
+### 发现与处理
+
+- `electron/scrcpy-manager.js` 仍包含早期未实现的占位类和 TODO，但当前 Electron 主进程未引用该文件；Android 投屏已统一下沉到 Python 后端，暂不影响运行。
+- 本轮未执行完整 `npm run electron:build`，已完成前端构建与后端打包验证；如需最终安装包验证，后续应重新打包并启动 `dist/electron/win-unpacked/MSCA.exe` 做 UI 可见性回归。
+
+### 最终提交 hash
+
+- 当前尚未提交，本轮代码与文档变更待统一提交。
+
+---
+
+## 2026-05-01 — 文档同步与发布前下一步计划制定
+
+### 触发背景
+
+用户要求同步所有文档，并制定下一步开发计划。当前代码已完成 iOS 15.1 控屏稳定性增强、Electron 打包产物启动修复、内嵌后端健康检查、设备接口与 iOS 15.1 投屏启动接口验证。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 进度同步 | 将 M13 构建打包与分发状态从验证中同步为已完成 | `doc/开发计划.md`, `doc/需求拆解.md`, `doc/下一步计划.md` |
+| 计划更新 | 新增发布前回归与稳定性增强阶段，明确 N1~N6 后续任务 | `doc/下一步计划.md` |
+| 架构说明修正 | 同步未知 iOS 版本优先 Tidevice 的策略 | `doc/项目需求及技术栈概览.md` |
+| 打包文档修正 | 更新 Nuitka standalone 后端目录、Electron 安装包与 win-unpacked 产物名称 | `dist/README.md`, `doc/操作手册.md`, `CLAUDE.md`, `README.md` |
+| 记录追溯 | 记录本轮文档同步操作和待验证项 | `memory/ai_step.md` |
+
+### 下一步开发计划摘要
+
+1. **N1 iOS 15.1 桌面 UI 控制回归（P0）**：验证点击、拖拽、滑动、长按、Home、锁屏、音量键和错误提示。
+2. **N2 Windows 安装包端到端验证（P0）**：安装 `MSCA Setup 0.1.0.exe` 后验证内嵌后端、设备列表、Android/iOS 投屏与控制。
+3. **N3 多设备稳定性压测（P1）**：Android+iOS 混合投屏连续运行，检查停止释放、进程、端口、WebSocket 与内存表现。
+4. **N4 控制失败与 WDA 排障增强（P1）**：补齐 WDA 签名过期、未信任设备、端口占用、适配器启动失败等日志与用户提示。
+5. **N5 发布文档收尾（P1）**：补充安装包使用、Web 部署、WDA 排障与验证命令。
+6. **N6 iOS 手势封装技术评估（P2）**：评估 `python-wda`、W3C Actions 或 Airtest 方案是否值得引入。
+
+### 验证结果
+
+- 本轮为文档同步与计划制定，未修改业务代码。
+- 已通过文档差异检查确认修改范围集中在项目文档与 AI 操作记录。
+
+### 最终提交 hash
+
+- 当前尚未提交，本轮文档变更待用户确认后提交。
+
+---
+
 ## 2026-05-01 — Electron 打包产物启动修复 + 内嵌后端验证
 
 ### 触发背景

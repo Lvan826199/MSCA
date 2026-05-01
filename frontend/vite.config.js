@@ -22,6 +22,7 @@ export default defineConfig(() => {
   console.log(`[vite] 后端 proxy 目标端口: ${backendPort}`)
 
   return {
+    base: "./",
     plugins: [vue()],
     resolve: {
       alias: {
