@@ -178,6 +178,12 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
     return None
 
 
+async def _send_ios_event(driver: IOSDriver, event: ControlEvent, websocket, message: str) -> None:
+    success = await driver.send_event(event)
+    if not success:
+        await websocket.send_json({"error": message})
+
+
 async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, websocket):
     """处理 iOS 设备控制指令，转换为 WDA REST API 调用。"""
     try:
@@ -188,7 +194,22 @@ async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, webs
                 return
             x = int(data.get("x", 0))
             y = int(data.get("y", 0))
-            await driver.send_event(ControlEvent("touch", {"action": action, "x": x, "y": y}))
+            await _send_ios_event(
+                driver,
+                ControlEvent("touch", {"action": action, "x": x, "y": y}),
+                websocket,
+                f"iOS 触控动作失败: {action}",
+            )
+
+        elif cmd_type == "tap":
+            x = int(data.get("x", 0))
+            y = int(data.get("y", 0))
+            await _send_ios_event(
+                driver,
+                ControlEvent("tap", {"x": x, "y": y}),
+                websocket,
+                "iOS 点击失败",
+            )
 
         elif cmd_type == "key":
             keycode = int(data.get("keycode", 0))
@@ -196,34 +217,59 @@ async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, webs
             key_map = {3: "home", 26: "lock", 24: "volumeUp", 25: "volumeDown"}
             key = key_map.get(keycode)
             if key:
-                await driver.send_event(ControlEvent("keyevent", {"key": key}))
+                await _send_ios_event(
+                    driver,
+                    ControlEvent("keyevent", {"key": key}),
+                    websocket,
+                    f"iOS 按键失败: {key}",
+                )
 
         elif cmd_type == "text":
             text = data.get("text", "")
             if text:
-                await driver.send_event(ControlEvent("text", {"text": text}))
+                await _send_ios_event(
+                    driver,
+                    ControlEvent("text", {"text": text}),
+                    websocket,
+                    "iOS 文本输入失败",
+                )
 
         elif cmd_type == "back":
             # iOS 没有返回键，忽略
             pass
 
         elif cmd_type == "home":
-            await driver.send_event(ControlEvent("keyevent", {"key": "home"}))
+            await _send_ios_event(
+                driver,
+                ControlEvent("keyevent", {"key": "home"}),
+                websocket,
+                "iOS Home 操作失败",
+            )
 
         elif cmd_type == "power":
-            await driver.send_event(ControlEvent("keyevent", {"key": "lock"}))
+            await _send_ios_event(
+                driver,
+                ControlEvent("keyevent", {"key": "lock"}),
+                websocket,
+                "iOS 锁屏操作失败",
+            )
 
         elif cmd_type == "scroll":
             # iOS 滑动模拟
             x = int(data.get("x", 0))
             y = int(data.get("y", 0))
             v_scroll = int(data.get("vScroll", 0))
-            dy = -v_scroll * 100  # 转换为像素偏移
-            await driver.send_event(ControlEvent("swipe", {
-                "fromX": x, "fromY": y,
-                "toX": x, "toY": y + dy,
-                "duration": 0.3,
-            }))
+            dy = max(-800, min(800, -v_scroll * 4))
+            await _send_ios_event(
+                driver,
+                ControlEvent("swipe", {
+                    "fromX": x, "fromY": y,
+                    "toX": x, "toY": y + dy,
+                    "duration": 0.3,
+                }),
+                websocket,
+                "iOS 滚动失败",
+            )
 
         else:
             await websocket.send_json({"error": f"iOS 不支持指令: {cmd_type}"})

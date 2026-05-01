@@ -106,7 +106,7 @@ npm run electron:build
 | `npm run build` | 构建 Vue 前端 |
 | `npm run backend:build` | Nuitka 编译后端为 exe |
 | `npm run backend:verify` | 验证后端 exe 是否正常运行 |
-| `npm run electron:build` | 完整打包（前端 + 后端 + Electron） |
+| `npm run electron:build` | 完整打包（前端 + 后端 + Electron），输出 `dist/electron/MSCA Setup 0.1.0.exe` |
 
 ## 部署模式
 

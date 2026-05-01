@@ -139,20 +139,38 @@ export function useDeviceControl(deviceId) {
     if (!canvasEl || !videoWidth || !videoHeight) return null
 
     const rect = canvasEl.getBoundingClientRect()
-    // canvas 显示区域内的相对坐标
-    const relX = clientX - rect.left
-    const relY = clientY - rect.top
+    if (!rect.width || !rect.height) return null
 
-    // canvas 显示尺寸与视频实际尺寸的比例
-    const scaleX = videoWidth / rect.width
-    const scaleY = videoHeight / rect.height
+    // object-fit: contain 时，canvas 内容会按比例居中显示，需要扣除左右/上下黑边。
+    const canvasRatio = canvasEl.width && canvasEl.height
+      ? canvasEl.width / canvasEl.height
+      : videoWidth / videoHeight
+    const rectRatio = rect.width / rect.height
+    let contentWidth = rect.width
+    let contentHeight = rect.height
+    let offsetX = 0
+    let offsetY = 0
+
+    if (rectRatio > canvasRatio) {
+      contentWidth = rect.height * canvasRatio
+      offsetX = (rect.width - contentWidth) / 2
+    } else if (rectRatio < canvasRatio) {
+      contentHeight = rect.width / canvasRatio
+      offsetY = (rect.height - contentHeight) / 2
+    }
+
+    const relX = clientX - rect.left - offsetX
+    const relY = clientY - rect.top - offsetY
+
+    const scaleX = videoWidth / contentWidth
+    const scaleY = videoHeight / contentHeight
 
     const devX = Math.round(relX * scaleX)
     const devY = Math.round(relY * scaleY)
 
     return {
-      x: Math.max(0, Math.min(devX, videoWidth)),
-      y: Math.max(0, Math.min(devY, videoHeight)),
+      x: Math.max(0, Math.min(devX, videoWidth - 1)),
+      y: Math.max(0, Math.min(devY, videoHeight - 1)),
       width: videoWidth,
       height: videoHeight,
     }
@@ -196,6 +214,8 @@ export function useDeviceControl(deviceId) {
       _documentMouseUpHandler = null
     }
     mouseDown = false
+    mouseMoved = false
+    _lastDownPos = null
     if (!canvasEl) return
     canvasEl.removeEventListener("mousedown", onMouseDown)
     canvasEl.removeEventListener("mousemove", onMouseMove)
@@ -211,9 +231,11 @@ export function useDeviceControl(deviceId) {
   }
 
   let mouseDown = false
+  let mouseMoved = false
   let _pendingMove = null
   let _rafId = null
   let _documentMouseUpHandler = null
+  let _lastDownPos = null
 
   function _emitSync(cmd) {
     if (_isSyncReceiving || !_onSyncEvent || !videoWidth || !videoHeight) return
@@ -236,8 +258,10 @@ export function useDeviceControl(deviceId) {
   function onMouseDown(e) {
     if (e.button !== 0) return
     mouseDown = true
+    mouseMoved = false
     const pos = canvasToDevice(e.clientX, e.clientY)
     if (pos) {
+      _lastDownPos = pos
       const cmd = { type: "touch", action: "down", ...pos }
       send(cmd)
       _emitSync(cmd)
@@ -254,6 +278,7 @@ export function useDeviceControl(deviceId) {
     if (!mouseDown) return
     const pos = canvasToDevice(e.clientX, e.clientY)
     if (pos) {
+      mouseMoved = true
       _pendingMove = { type: "touch", action: "move", ...pos }
       if (!_rafId) _rafId = requestAnimationFrame(_flushMove)
     }
@@ -269,12 +294,13 @@ export function useDeviceControl(deviceId) {
     }
     if (_pendingMove) { send(_pendingMove); _emitSync(_pendingMove); _pendingMove = null }
     if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
-    const pos = canvasToDevice(e.clientX, e.clientY)
+    const pos = canvasToDevice(e.clientX, e.clientY) || _lastDownPos
     if (pos) {
-      const cmd = { type: "touch", action: "up", ...pos }
+      const cmd = { type: "tap", ...pos }
       send(cmd)
       _emitSync(cmd)
     }
+    _lastDownPos = null
   }
 
   function onWheel(e) {
@@ -365,8 +391,8 @@ export function useDeviceControl(deviceId) {
       send({
         type: evt.type,
         action: evt.action,
-        x: Math.round(evt.nx * videoWidth),
-        y: Math.round(evt.ny * videoHeight),
+        x: Math.max(0, Math.min(Math.round(evt.nx * videoWidth), videoWidth - 1)),
+        y: Math.max(0, Math.min(Math.round(evt.ny * videoHeight), videoHeight - 1)),
         width: videoWidth,
         height: videoHeight,
       })

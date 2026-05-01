@@ -10,7 +10,7 @@
     "build": "npm --prefix frontend run build",
     "build:web": "node scripts/build-web.mjs",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
-    "electron:build": "npm run build && npm run backend:build && electron-builder",
+    "electron:build": "npm run build && npm run backend:build && cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder",
     "backend:build": "node scripts/build-backend.mjs",
     "backend:verify": "node scripts/verify-backend.mjs",
     "dist:clean": "node scripts/clean-dist.mjs",
@@ -36,7 +36,8 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "resources/icon.ico"
+      "icon": "resources/icon.ico",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,

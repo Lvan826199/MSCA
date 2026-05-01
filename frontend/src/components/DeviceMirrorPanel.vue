@@ -27,7 +27,10 @@
         <p>启动中...</p>
       </div>
 
-      <canvas v-else ref="canvasEl" class="panel-canvas" />
+      <div v-else class="panel-canvas-wrap">
+        <canvas ref="canvasEl" class="panel-canvas" />
+        <div v-if="controlError" class="panel-control-error">{{ controlError }}</div>
+      </div>
     </div>
 
     <DeviceControlBar
@@ -88,6 +91,7 @@ const fps = computed(() => decoderRef.value?.fps.value ?? 0)
 const decoderError = computed(() => decoderRef.value?.error.value ?? null)
 
 const control = useDeviceControl(props.deviceId)
+const controlError = computed(() => control.error.value)
 
 // 投屏参数从持久化设置读取
 const { getMirrorOptions } = useSettings()
@@ -313,11 +317,34 @@ defineExpose({ startMirror, stopMirror, mirroring, control, deviceId: props.devi
   margin-bottom: 8px;
 }
 
+.panel-canvas-wrap {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
 .panel-canvas {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   background: #000;
   cursor: pointer;
+}
+
+.panel-control-error {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(245, 108, 108, 0.9);
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+  pointer-events: none;
 }
 </style>

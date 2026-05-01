@@ -104,6 +104,7 @@ class TideviceAdapter(IOSAdapterBase):
         await self.stop_wda()
         config = load_wda_config()
         mjpeg_device_port = config.get("mjpeg_port_on_device", 9100)
+        wda_device_port = config.get("wda_port_on_device", 8100)
 
         # 确保端口空闲
         if not is_port_free(port):
@@ -118,10 +119,10 @@ class TideviceAdapter(IOSAdapterBase):
             kill_process_on_port(mjpeg_port)
             await asyncio.sleep(0.3)
 
-        logger.info(f"[{self.udid}] tidevice start_wda: WDA={port}, MJPEG={mjpeg_port}, 设备MJPEG={mjpeg_device_port}")
+        logger.info(f"[{self.udid}] tidevice start_wda: WDA={port}, MJPEG={mjpeg_port}, 设备WDA={wda_device_port}, 设备MJPEG={mjpeg_device_port}")
 
         # 先尝试 relay 模式
-        if await self._try_relay_mode(port, mjpeg_port, mjpeg_device_port):
+        if await self._try_relay_mode(port, mjpeg_port, wda_device_port, mjpeg_device_port):
             return self.wda_info
 
         # WDA 未在运行，启动完整的 wdaproxy（含一次重试）
@@ -147,11 +148,11 @@ class TideviceAdapter(IOSAdapterBase):
                         await asyncio.sleep(0.3)
         raise last_error
 
-    async def _try_relay_mode(self, port: int, mjpeg_port: int, mjpeg_device_port: int) -> bool:
-        """尝试 relay 模式：端口转发到设备 8100，检测 WDA 是否已在运行。"""
-        logger.info(f"[{self.udid}] 尝试 relay 模式（检测 WDA 是否已在设备上运行）")
+    async def _try_relay_mode(self, port: int, mjpeg_port: int, wda_device_port: int, mjpeg_device_port: int) -> bool:
+        """尝试 relay 模式：端口转发到设备 WDA 端口，检测 WDA 是否已在运行。"""
+        logger.info(f"[{self.udid}] 尝试 relay 模式（检测 WDA 是否已在设备上运行，设备WDA={wda_device_port}）")
         self._proxy_process = subprocess.Popen(
-            ["tidevice", "-u", self.udid, "relay", str(port), "8100"],
+            ["tidevice", "-u", self.udid, "relay", str(port), str(wda_device_port)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 

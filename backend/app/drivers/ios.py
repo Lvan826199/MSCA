@@ -16,6 +16,31 @@ logger = logging.getLogger(__name__)
 IOS_WDA_BASE_PORT = 8100
 IOS_WDA_PORT_STEP = 10
 
+
+def _jpeg_size(data: bytes) -> dict:
+    """解析 JPEG 图片尺寸，避免为尺寸探测引入 Pillow 依赖。"""
+    index = 2
+    while index + 9 < len(data):
+        if data[index] != 0xFF:
+            index += 1
+            continue
+        marker = data[index + 1]
+        index += 2
+        if marker in {0xD8, 0xD9}:
+            continue
+        if index + 2 > len(data):
+            break
+        segment_len = int.from_bytes(data[index:index + 2], "big")
+        if segment_len < 2 or index + segment_len > len(data):
+            break
+        if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+            height = int.from_bytes(data[index + 3:index + 5], "big")
+            width = int.from_bytes(data[index + 5:index + 7], "big")
+            return {"width": width, "height": height}
+        index += segment_len
+    return {}
+
+
 _port_counter = 0
 
 
@@ -110,10 +135,13 @@ class IOSDriver(AbstractDeviceDriver):
             logger.warning("[%s] WDA session 创建失败: %s", self.device_id, err)
 
         try:
-            size = await self._get_window_size()
+            size = await self._get_screenshot_size()
+            if not size:
+                size = await self._get_window_size()
             self._screen_width = size.get("width", 375)
             self._screen_height = size.get("height", 812)
-        except Exception:
+        except Exception as err:
+            logger.warning("[%s] iOS 屏幕尺寸获取失败，使用默认值: %s", self.device_id, err)
             self._screen_width, self._screen_height = 375, 812
 
         self._is_mirroring = True
@@ -150,18 +178,41 @@ class IOSDriver(AbstractDeviceDriver):
         self._video_subscribers.clear()
         logger.info("[%s] iOS 投屏已停止", self.device_id)
 
+    async def _post_wda(self, url: str, payload: dict | None = None) -> bool:
+        if not self._http:
+            logger.warning("[%s] iOS 控制 HTTP 会话不可用", self.device_id)
+            return False
+
+        kwargs = {"json": payload} if payload is not None else {}
+        async with self._http.post(url, **kwargs) as resp:
+            text = await resp.text()
+            if 200 <= resp.status < 300:
+                logger.debug("[%s] WDA 控制成功: %s", self.device_id, url)
+                return True
+            logger.warning(
+                "[%s] WDA 控制失败: HTTP %s %s，响应: %s",
+                self.device_id,
+                resp.status,
+                url,
+                text[:500],
+            )
+            return False
+
     async def send_event(self, event: ControlEvent) -> bool:
         if not self._adapter.wda_info or not self._http:
+            logger.warning("[%s] WDA 信息或 HTTP 会话不可用，无法发送 iOS 控制指令", self.device_id)
             return False
 
         base = f"http://{self._adapter.wda_info.host}:{self._adapter.wda_info.port}"
         session_path = f"/session/{self._session_id}" if self._session_id else ""
+        if not session_path:
+            logger.warning("[%s] WDA session 不可用，iOS 控制可能失败", self.device_id)
 
         try:
             if event.action == "tap":
-                await self._http.post(
+                return await self._post_wda(
                     f"{base}{session_path}/wda/tap/0",
-                    json={"x": event.params.get("x", 0), "y": event.params.get("y", 0)},
+                    {"x": event.params.get("x", 0), "y": event.params.get("y", 0)},
                 )
             elif event.action == "touch":
                 action = event.params.get("action", "")
@@ -174,14 +225,14 @@ class IOSDriver(AbstractDeviceDriver):
                 if not endpoint:
                     logger.warning("[%s] 未知 iOS 触控动作: %s", self.device_id, action)
                     return False
-                await self._http.post(
+                return await self._post_wda(
                     f"{base}{session_path}{endpoint}",
-                    json={"x": event.params.get("x", 0), "y": event.params.get("y", 0)},
+                    {"x": event.params.get("x", 0), "y": event.params.get("y", 0)},
                 )
             elif event.action == "swipe":
-                await self._http.post(
+                return await self._post_wda(
                     f"{base}{session_path}/wda/dragfromtoforduration",
-                    json={
+                    {
                         "fromX": event.params.get("fromX", 0),
                         "fromY": event.params.get("fromY", 0),
                         "toX": event.params.get("toX", 0),
@@ -192,30 +243,32 @@ class IOSDriver(AbstractDeviceDriver):
             elif event.action == "keyevent":
                 key = event.params.get("key", "")
                 if key == "home":
-                    await self._http.post(f"{base}/wda/homescreen")
+                    return await self._post_wda(f"{base}/wda/homescreen")
                 elif key == "lock":
-                    await self._http.post(f"{base}/wda/lock")
+                    return await self._post_wda(f"{base}/wda/lock")
                 elif key == "volumeUp":
-                    await self._http.post(
+                    return await self._post_wda(
                         f"{base}{session_path}/wda/pressButton",
-                        json={"name": "volumeUp"},
+                        {"name": "volumeUp"},
                     )
                 elif key == "volumeDown":
-                    await self._http.post(
+                    return await self._post_wda(
                         f"{base}{session_path}/wda/pressButton",
-                        json={"name": "volumeDown"},
+                        {"name": "volumeDown"},
                     )
+                logger.warning("[%s] 未知 iOS 按键: %s", self.device_id, key)
+                return False
             elif event.action == "text":
                 text = event.params.get("text", "")
                 if text:
-                    await self._http.post(
+                    return await self._post_wda(
                         f"{base}{session_path}/wda/keys",
-                        json={"value": list(text)},
+                        {"value": list(text)},
                     )
+                return True
             else:
                 logger.warning("[%s] 未知 iOS 控制指令: %s", self.device_id, event.action)
                 return False
-            return True
         except Exception as err:
             logger.error("[%s] iOS 控制指令失败: %s", self.device_id, err)
             return False
@@ -264,15 +317,52 @@ class IOSDriver(AbstractDeviceDriver):
     async def _create_session(self) -> str:
         base = f"http://{self._adapter.wda_info.host}:{self._adapter.wda_info.port}"
         async with self._http.post(f"{base}/session", json={"capabilities": {}}) as resp:
-            data = await resp.json()
-            return data.get("sessionId", "") or data.get("value", {}).get("sessionId", "")
+            text = await resp.text()
+            if resp.status < 200 or resp.status >= 300:
+                raise RuntimeError(f"HTTP {resp.status}: {text[:500]}")
+            try:
+                data = await resp.json(content_type=None)
+            except Exception as err:
+                raise RuntimeError(f"session 响应不是有效 JSON: {text[:500]}") from err
+            session_id = data.get("sessionId", "") or data.get("value", {}).get("sessionId", "")
+            if not session_id:
+                raise RuntimeError(f"sessionId 缺失: {text[:500]}")
+            return session_id
+
+    async def _read_wda_json(self, url: str) -> dict:
+        if not self._http:
+            return {}
+        try:
+            async with self._http.get(url) as resp:
+                text = await resp.text()
+                if resp.status < 200 or resp.status >= 300:
+                    logger.debug("[%s] WDA GET 失败: HTTP %s %s，响应: %s", self.device_id, resp.status, url, text[:300])
+                    return {}
+                data = await resp.json(content_type=None)
+                return data if isinstance(data, dict) else {}
+        except Exception as err:
+            logger.debug("[%s] WDA GET 异常: %s %s", self.device_id, url, err)
+            return {}
 
     async def _get_window_size(self) -> dict:
         base = f"http://{self._adapter.wda_info.host}:{self._adapter.wda_info.port}"
         session_path = f"/session/{self._session_id}" if self._session_id else ""
-        async with self._http.get(f"{base}{session_path}/window/size") as resp:
-            data = await resp.json()
-            return data.get("value", {})
+        data = await self._read_wda_json(f"{base}{session_path}/window/size")
+        value = data.get("value", {})
+        return value if isinstance(value, dict) else {}
+
+    async def _get_screenshot_size(self) -> dict:
+        base = f"http://{self._adapter.wda_info.host}:{self._adapter.wda_info.port}"
+        data = await self._read_wda_json(f"{base}/screenshot")
+        value = data.get("value", "")
+        if not isinstance(value, str) or not value:
+            return {}
+        try:
+            image = base64.b64decode(value)
+            return _jpeg_size(image)
+        except Exception as err:
+            logger.debug("[%s] 截图尺寸解析失败: %s", self.device_id, err)
+            return {}
 
     async def _read_mjpeg_loop(self) -> None:
         wda_info = self._adapter.wda_info

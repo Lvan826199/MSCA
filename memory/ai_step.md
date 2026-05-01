@@ -4,6 +4,73 @@
 
 ---
 
+## 2026-04-30 — iOS 15.1 控屏稳定性增强 + 完整发布验证 + Electron 打包通过
+
+### 触发背景
+
+用户要求继续完善 iOS 真机投屏 / 控制稳定性，明确 iOS 15.1 当前仍无法控屏；同时要求执行完整发布验证（`npm run build`、`npm run dev:backend`、`npm run backend:verify`）和 Electron 打包验证（`npm run electron:build`），并继续排查现有 bug。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| iOS 控制可观测性 | WDA 控制请求统一检查 HTTP 状态码与响应体，失败返回 `False` 并记录日志 | `backend/app/drivers/ios.py` |
+| iOS 控制反馈 | 控制 WebSocket 检查 `send_event()` 返回值，失败时向前端返回错误 | `backend/app/websocket/control.py` |
+| iOS 点击兼容 | 鼠标简单点击最终发送 `tap` 指令，后端映射到 WDA `/wda/tap/0`；拖动仍走 down/move/up | `frontend/src/composables/useDeviceControl.js`, `backend/app/websocket/control.py` |
+| iOS 坐标修复 | Canvas 坐标换算扣除 `object-fit: contain` 黑边，并将坐标限制到 `0..width-1/height-1` | `frontend/src/composables/useDeviceControl.js` |
+| iOS 尺寸修复 | 启动时优先读取 WDA screenshot JPEG 尺寸，降低 WDA point 与 MJPEG pixel 不一致导致的触控偏移 | `backend/app/drivers/ios.py` |
+| iOS 版本选择 | go-ios 扫描补齐 tidevice 缺失的版本；版本未知时优先 tidevice，避免 iOS 15.x 误走 go-ios | `backend/app/core/device_manager.py` |
+| WDA 端口配置 | tidevice/go-ios 端口转发读取 `wda_port_on_device`，不再硬编码设备端 8100 | `backend/app/drivers/adapters/tidevice_adapter.py`, `backend/app/drivers/adapters/goios_adapter.py` |
+| 前端提示 | 投屏面板展示控制 WebSocket 返回的控制错误 | `frontend/src/components/DeviceMirrorPanel.vue` |
+| 打包修复 | electron-builder 二进制依赖使用国内镜像，Windows 非管理员环境关闭 `signAndEditExecutable` 避免 winCodeSign 符号链接权限失败 | `package.json` |
+| 文档同步 | 更新 M13 进度、Electron 打包说明和未知版本 iOS 适配说明 | `README.md`, `CLAUDE.md`, `doc/下一步计划.md` |
+
+### 关键代码变更
+
+**iOS 15.1 控屏链路增强：**
+- `IOSDriver._post_wda()` 统一封装 WDA POST 请求，记录非 2xx 状态码和响应体前 500 字符。
+- 控制 WebSocket 不再吞掉 WDA 控制失败，前端可看到如“iOS 点击失败 / iOS 触控动作失败”等提示。
+- 简单鼠标点击改用 WDA tap endpoint，降低 iOS 15.1 对 `/wda/touch/down|up` 连续触控 endpoint 不兼容的风险。
+- 拖动/滑动仍保留完整 `down → move → up` 序列。
+- iOS 屏幕尺寸优先采用 screenshot JPEG 实际尺寸，坐标转换扣除 contain 黑边并避免边界坐标等于宽高。
+
+**iOS 适配器选择修复：**
+- tidevice 扫描到设备但版本为空时，允许 go-ios 同 UDID 结果补齐版本。
+- 如果最终版本仍未知，优先使用 tidevice，避免 iOS 15.1 误走 go-ios tunnel/runwda 路径。
+
+**Electron 打包修复：**
+- 第一次 `electron:build` 失败：`winCodeSign-2.6.0.7z` 从 GitHub 下载超时。
+- 增加 `ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/` 后，下载问题解决。
+- 第二次失败：Windows 当前权限无法创建 `winCodeSign` 包内 darwin 符号链接。
+- 设置 `build.win.signAndEditExecutable=false` 后，非管理员环境打包通过。
+
+### 验证步骤（已执行）
+
+1. **Python 修改语法检查**：`python -m py_compile backend/app/drivers/ios.py backend/app/websocket/control.py backend/app/core/device_manager.py backend/app/drivers/adapters/tidevice_adapter.py backend/app/drivers/adapters/goios_adapter.py` → 通过。
+2. **前端构建**：`npm run build` → 1028 modules transformed，构建成功。
+3. **后端健康检查**：`npm run dev:backend` + 读取 `.backend-port` 请求 `/health` → `{"status":"ok"}`。
+4. **后端编译与验证**：`npm run backend:build && npm run backend:verify` → `/health` 返回 `{"status":"ok"}`，`/api/devices` 返回 200，`后端打包验证通过`。
+5. **Electron 打包验证**：`npm run electron:build` → 通过，生成：
+   - `dist/electron/MSCA Setup 0.1.0.exe`
+   - `dist/electron/win-unpacked/MSCA.exe`
+6. **Electron 资源检查**：确认打包目录包含：
+   - `dist/electron/win-unpacked/resources/bin/android/scrcpy-server`
+   - `dist/electron/win-unpacked/resources/bin/android/bundletool.jar`
+   - `dist/electron/win-unpacked/resources/bin/ios/ios.exe`
+   - `dist/electron/win-unpacked/resources/resources/msca-backend/msca-backend.exe`
+
+### 待后续执行
+
+- 在真实 iOS 15.1 设备上回归点击、拖拽、滑动、长按、Home/锁屏/音量键控制表现。
+- 安装 `dist/electron/MSCA Setup 0.1.0.exe` 后做端到端启动验证：内嵌后端自动启动、设备列表、Android/iOS 投屏和控制链路。
+- 如果 iOS 15.1 仍无法控屏，优先查看后端 WDA HTTP 状态码/响应体日志，判断是 endpoint 不支持、session 缺失、坐标系不匹配还是 WDA 签名/权限问题。
+
+### 最终提交 hash
+
+- 当前尚未提交，本轮变更待用户确认后提交。
+
+---
+
 ## 2026-04-30 — 文档同步 + 代码审查与 M13 后端打包验证
 
 ### 触发背景

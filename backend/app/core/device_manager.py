@@ -240,24 +240,32 @@ class DeviceManager:
             except Exception as e:
                 logger.debug(f"tidevice 设备扫描失败: {e}")
 
-        # go-ios 扫描（补充 tidevice 未发现的设备）
+        # go-ios 扫描（补充 tidevice 未发现的设备，也补齐 tidevice 未取到的版本信息）
         if self._goios_available:
             try:
                 from ..drivers.adapters.goios_adapter import GoIOSAdapter
                 adapter = GoIOSAdapter(udid="", ios_bin=self._goios_bin)
+                by_udid = {d.id: d for d in devices}
                 for d in await adapter.list_devices():
                     udid = d.get("udid", "")
-                    if not udid or udid in seen_udids:
+                    if not udid:
+                        continue
+                    if udid in seen_udids:
+                        existing = by_udid.get(udid)
+                        if existing and not existing.version and d.get("version", ""):
+                            existing.version = d.get("version", "")
                         continue
                     seen_udids.add(udid)
-                    devices.append(DeviceInfo(
+                    device = DeviceInfo(
                         id=udid,
                         platform="ios",
                         model=d.get("model", "") or d.get("name", ""),
                         version=d.get("version", ""),
                         resolution="",
                         status="online",
-                    ))
+                    )
+                    devices.append(device)
+                    by_udid[udid] = device
             except Exception as e:
                 logger.debug(f"go-ios 设备扫描失败: {e}")
 
@@ -297,8 +305,18 @@ class DeviceManager:
 
         major = _parse_ios_major(version)
 
-        # iOS ≤15.x 优先 tidevice，≥16.x 优先 go-ios
-        if major > 0 and major < IOS_GOIOS_MIN_VERSION:
+        # iOS ≤15.x 优先 tidevice，≥16.x 优先 go-ios；版本未知时优先 tidevice，避免 iOS 15.x 误走 go-ios。
+        if major == 0:
+            if self._tidevice_available:
+                logger.warning(f"[{udid}] iOS 版本未知，优先使用 tidevice")
+                from ..drivers.adapters.tidevice_adapter import TideviceAdapter
+                return TideviceAdapter(udid=udid)
+            if self._goios_available:
+                logger.warning(f"[{udid}] iOS 版本未知且 tidevice 不可用，回退到 go-ios")
+                from ..drivers.adapters.goios_adapter import GoIOSAdapter
+                return GoIOSAdapter(udid=udid, ios_bin=self._goios_bin)
+
+        if major < IOS_GOIOS_MIN_VERSION:
             if self._tidevice_available:
                 from ..drivers.adapters.tidevice_adapter import TideviceAdapter
                 return TideviceAdapter(udid=udid)

@@ -126,6 +126,7 @@ class GoIOSAdapter(IOSAdapterBase):
         await self.stop_wda()
         config = load_wda_config()
         mjpeg_device_port = config.get("mjpeg_port_on_device", 9100)
+        wda_device_port = config.get("wda_port_on_device", 8100)
 
         # 确保端口空闲
         if not is_port_free(port):
@@ -140,23 +141,23 @@ class GoIOSAdapter(IOSAdapterBase):
             kill_process_on_port(mjpeg_port)
             await asyncio.sleep(0.3)
 
-        logger.info(f"[{self.udid}] go-ios start_wda: WDA={port}, MJPEG={mjpeg_port}, 设备MJPEG={mjpeg_device_port}")
+        logger.info(f"[{self.udid}] go-ios start_wda: WDA={port}, MJPEG={mjpeg_port}, 设备WDA={wda_device_port}, 设备MJPEG={mjpeg_device_port}")
 
         # iOS 17+ 需要先启动 tunnel agent
         await self._ensure_tunnel()
 
         # 先尝试 relay 模式（WDA 已在运行）
-        if await self._try_relay_mode(port, mjpeg_port, mjpeg_device_port):
+        if await self._try_relay_mode(port, mjpeg_port, wda_device_port, mjpeg_device_port):
             return self.wda_info
 
         # WDA 未在运行，启动完整的 runwda
-        return await self._start_runwda(port, mjpeg_port, mjpeg_device_port)
+        return await self._start_runwda(port, mjpeg_port, wda_device_port, mjpeg_device_port)
 
-    async def _try_relay_mode(self, port: int, mjpeg_port: int, mjpeg_device_port: int) -> bool:
+    async def _try_relay_mode(self, port: int, mjpeg_port: int, wda_device_port: int, mjpeg_device_port: int) -> bool:
         """尝试 relay 模式：只做端口转发，检测 WDA 是否已在运行。"""
-        logger.info(f"[{self.udid}] go-ios 尝试 relay 模式")
+        logger.info(f"[{self.udid}] go-ios 尝试 relay 模式（设备WDA={wda_device_port}）")
         self._tunnel_process = subprocess.Popen(
-            [self._ios_bin, "forward", str(port), "8100", f"--udid={self.udid}"],
+            [self._ios_bin, "forward", str(port), str(wda_device_port), f"--udid={self.udid}"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
@@ -180,15 +181,15 @@ class GoIOSAdapter(IOSAdapterBase):
         self.wda_info = None
         return False
 
-    async def _start_runwda(self, port: int, mjpeg_port: int, mjpeg_device_port: int) -> WDAInfo:
+    async def _start_runwda(self, port: int, mjpeg_port: int, wda_device_port: int, mjpeg_device_port: int) -> WDAInfo:
         """启动完整的 runwda + 端口转发。"""
         # 检测 WDA bundle ID
         bundle_id = await self.detect_wda_bundle_id()
 
         # 启动 WDA API 端口转发
-        logger.info(f"[{self.udid}] 启动 go-ios 端口转发: 本地 {port} → 设备 8100")
+        logger.info(f"[{self.udid}] 启动 go-ios 端口转发: 本地 {port} → 设备 {wda_device_port}")
         self._tunnel_process = subprocess.Popen(
-            [self._ios_bin, "forward", str(port), "8100", f"--udid={self.udid}"],
+            [self._ios_bin, "forward", str(port), str(wda_device_port), f"--udid={self.udid}"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
