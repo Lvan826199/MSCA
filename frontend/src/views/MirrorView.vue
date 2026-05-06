@@ -259,6 +259,7 @@ onUnmounted(() => {
 <style scoped>
 .mirror-view {
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -295,6 +296,7 @@ onUnmounted(() => {
 
 .mirror-grid {
   flex: 1;
+  min-height: 0;
   display: grid;
   gap: 8px;
   overflow: hidden;

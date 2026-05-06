@@ -57,6 +57,7 @@ import { Close, Loading } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
 import { useDeviceControl } from "@/composables/useDeviceControl"
 import { useSettings } from "@/composables/useSettings"
+import { createMirrorStartTimeout } from "@/utils/mirrorPanel"
 
 const DeviceControlBar = defineAsyncComponent(() => import("./DeviceControlBar.vue"))
 
@@ -92,6 +93,7 @@ const decoderError = computed(() => decoderRef.value?.error.value ?? null)
 
 const control = useDeviceControl(props.deviceId)
 const controlError = computed(() => control.error.value)
+const MIRROR_START_TIMEOUT_MS = 30_000
 
 // 投屏参数从持久化设置读取
 const { getMirrorOptions } = useSettings()
@@ -119,10 +121,13 @@ async function startMirror() {
   starting.value = true
   errorMsg.value = ""
 
+  const startTimeout = createMirrorStartTimeout(MIRROR_START_TIMEOUT_MS)
+
   try {
     const res = await fetch(`${getApiBase()}/api/mirror/${props.deviceId}/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: startTimeout.signal,
       body: JSON.stringify({
         max_fps: getMirrorOptions().maxFps,
         bitrate: getMirrorOptions().bitrate,
@@ -156,8 +161,10 @@ async function startMirror() {
     }
   } catch (e) {
     starting.value = false
-    errorMsg.value = e.message
-    emit("error", props.deviceId, e.message)
+    errorMsg.value = startTimeout.signal.aborted ? startTimeout.getErrorMessage() : e.message
+    emit("error", props.deviceId, errorMsg.value)
+  } finally {
+    startTimeout.clear()
   }
 }
 
@@ -294,6 +301,7 @@ defineExpose({ startMirror, stopMirror, mirroring, control, deviceId: props.devi
   align-items: center;
   overflow: hidden;
   position: relative;
+  min-height: 0;
 }
 
 .panel-loading {
@@ -319,6 +327,8 @@ defineExpose({ startMirror, stopMirror, mirroring, control, deviceId: props.devi
 
 .panel-canvas-wrap {
   position: relative;
+  width: 100%;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
   display: flex;
@@ -327,6 +337,8 @@ defineExpose({ startMirror, stopMirror, mirroring, control, deviceId: props.devi
 }
 
 .panel-canvas {
+  width: 100%;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;

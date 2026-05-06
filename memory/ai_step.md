@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-05-06 — 投屏画面缩放与启动超时提示修复
+
+### 触发背景
+
+用户反馈投屏已能启动，但画面比例不对且显示过大；同时投屏启动超时时前端一直停留在“启动中...”，缺少明确提示。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及范围 |
+|:---|:---|:---|
+| 根因调查 | 检查投屏面板、镜像视图、视频解码与后端启动接口 | `frontend/src/components/DeviceMirrorPanel.vue`, `frontend/src/views/MirrorView.vue`, `frontend/src/composables/useVideoDecoder.js`, `backend/app/api/mirror.py` |
+| 画面缩放修复 | 为投屏页面主区域、网格、画布容器补齐 `min-height: 0` 与固定填充尺寸，Canvas 使用 `object-fit: contain` 在容器内等比缩放 | `frontend/src/App.vue`, `frontend/src/views/MirrorView.vue`, `frontend/src/components/DeviceMirrorPanel.vue` |
+| 超时提示修复 | 为启动投屏请求增加前端 `AbortController` 超时控制，超时后展示明确中文错误并允许重试 | `frontend/src/components/DeviceMirrorPanel.vue`, `frontend/src/utils/mirrorPanel.js` |
+| 回归测试 | 新增 Node 内置测试覆盖画布等比缩放样式约束与启动超时错误消息 | `frontend/src/utils/mirrorPanel.test.js` |
+
+### 验证步骤（已执行）
+
+1. **红灯测试**：`node --test "E:/Y_pythonProject/MSCA/frontend/src/utils/mirrorPanel.test.js"` → 初始失败，原因为 `mirrorPanel.js` 尚不存在，证明新增行为尚未实现。
+2. **单元测试**：`node --test "E:/Y_pythonProject/MSCA/frontend/src/utils/mirrorPanel.test.js"` → 通过，2 tests pass。
+3. **前端构建验证**：`npm run build` → 通过，Vite 构建成功，1029 modules transformed。
+
+### 发现与处理
+
+- 画面过大/比例异常的根因是 Canvas 仅设置 `max-width/max-height`，而上层 flex/grid 容器缺少 `min-height: 0` 与确定高度约束；Canvas intrinsic 分辨率变化后可能撑开网格区域。
+- 启动超时一直转圈的根因是 `fetch()` 没有客户端超时机制；若后端启动流程或网络请求长时间未返回，`starting` 状态不会退出。
+- 本次仅修改前端布局约束与启动请求超时，不改动后端投屏协议与视频解码流程。
+
+### 后续建议
+
+- 建议用真实 Android/iOS 设备分别确认投屏面板在 1/2/4 宫格和全屏模式下均能等比显示。
+- 若实际设备启动耗时经常超过 30 秒，可再根据真实日志调整 `MIRROR_START_TIMEOUT_MS`。
+
+### 最终提交 hash
+
+- 待提交后回填
+
+---
+
 ## 2026-05-06 — N4/N5/N6 发布收尾与 WDA 排障增强
 
 ### 触发背景

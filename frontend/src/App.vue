@@ -129,5 +129,7 @@ html, body, #app {
   background: #141414;
   color: #e5eaf3;
   padding: 20px;
+  min-height: 0;
+  overflow: hidden;
 }
 </style>
