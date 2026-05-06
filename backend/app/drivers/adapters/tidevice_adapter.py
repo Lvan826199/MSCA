@@ -11,7 +11,14 @@ import fnmatch
 import logging
 import subprocess
 
-from .base import IOSAdapterBase, WDAInfo, is_port_free, kill_process_on_port, load_wda_config
+from .base import (
+    IOSAdapterBase,
+    WDAInfo,
+    diagnose_wda_failure,
+    is_port_free,
+    kill_process_on_port,
+    load_wda_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +119,7 @@ class TideviceAdapter(IOSAdapterBase):
             kill_process_on_port(port)
             await asyncio.sleep(0.5)
             if not is_port_free(port):
-                raise RuntimeError(f"端口 {port} 仍被占用")
+                raise RuntimeError(diagnose_wda_failure(f"端口 {port} 被占用").format())
 
         if mjpeg_port and not is_port_free(mjpeg_port):
             logger.warning(f"[{self.udid}] MJPEG 端口 {mjpeg_port} 被占用，尝试清理")
@@ -132,10 +139,11 @@ class TideviceAdapter(IOSAdapterBase):
                 return await self._start_wdaproxy(port, mjpeg_port, mjpeg_device_port)
             except (RuntimeError, TimeoutError) as e:
                 last_error = e
+                hint = diagnose_wda_failure(e)
                 if attempt == 0:
                     logger.warning(
-                        "[%s] wdaproxy 第 1 次启动失败: %s，清理后重试...",
-                        self.udid, e
+                        "[%s] wdaproxy 第 1 次启动失败，分类=%s，错误=%s，建议=%s，清理后重试...",
+                        self.udid, hint.category, e, hint.suggestion
                     )
                     # 彻底清理后重试
                     await self.stop_wda()
@@ -146,6 +154,11 @@ class TideviceAdapter(IOSAdapterBase):
                     if mjpeg_port and not is_port_free(mjpeg_port):
                         kill_process_on_port(mjpeg_port)
                         await asyncio.sleep(0.3)
+                else:
+                    logger.error(
+                        "[%s] wdaproxy 重试后仍失败，分类=%s，错误=%s，建议=%s",
+                        self.udid, hint.category, e, hint.suggestion
+                    )
         raise last_error
 
     async def _try_relay_mode(self, port: int, mjpeg_port: int, wda_device_port: int, mjpeg_device_port: int) -> bool:
@@ -194,7 +207,8 @@ class TideviceAdapter(IOSAdapterBase):
             await asyncio.sleep(1)
             if self._proxy_process.poll() is not None:
                 stderr = self._proxy_process.stderr.read().decode(errors='replace') if self._proxy_process.stderr else ""
-                raise RuntimeError(f"WDA 代理进程退出: {stderr[:500]}")
+                raw_error = f"WDA 代理进程退出: {stderr[:500]}"
+                raise RuntimeError(diagnose_wda_failure(raw_error).format())
 
             self.wda_info = WDAInfo(host="127.0.0.1", port=port, mjpeg_port=mjpeg_port)
             if await self.check_wda_health():
@@ -203,7 +217,7 @@ class TideviceAdapter(IOSAdapterBase):
                     await self._start_mjpeg_relay(mjpeg_port, mjpeg_device_port)
                 return self.wda_info
 
-        raise TimeoutError(f"[{self.udid}] WDA 启动超时（30s）")
+        raise TimeoutError(diagnose_wda_failure(f"[{self.udid}] WDA 启动超时（30s）").format())
 
     async def _start_mjpeg_relay(self, mjpeg_port: int, mjpeg_device_port: int) -> None:
         """启动 MJPEG 端口转发（设备端 9100 → 本地 mjpeg_port）。"""

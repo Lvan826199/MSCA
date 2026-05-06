@@ -181,7 +181,7 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
 async def _send_ios_event(driver: IOSDriver, event: ControlEvent, websocket, message: str) -> None:
     success = await driver.send_event(event)
     if not success:
-        await websocket.send_json({"error": message})
+        await websocket.send_json({"error": f"{message}。{driver.diagnose_control_failure()}"})
 
 
 async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, websocket):

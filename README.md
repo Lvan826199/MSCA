@@ -159,6 +159,31 @@ msca/
 └── package.json              # Node.js 项目配置
 ```
 
+## 发布与验证清单
+
+发布前建议按顺序执行以下验证：
+
+1. `npm run build`：验证 Vue 前端可正常构建。
+2. `npm run backend:verify`：验证 Nuitka 后端 standalone 产物可启动，并通过 `/health` 与 `/api/devices` 检查。
+3. `npm run electron:build`：生成 Windows 安装包与免安装目录。
+4. 安装 `dist/electron/MSCA Setup 0.1.0.exe` 后启动应用，确认内嵌后端自动拉起、设备列表正常。
+5. 连接 Android 与 iOS 设备，分别验证投屏启动、控制操作、停止投屏与资源释放。
+
+## iOS WDA 排障速查
+
+| 场景 | 前端/日志提示 | 处理方式 |
+| :--- | :--- | :--- |
+| WDA 签名过期或无效 | `WDA 签名无效或已过期` | 使用有效开发者证书重新签名并安装 WDA；免费账号通常 7 天后需重新签名 |
+| 设备未信任电脑 | `iOS 设备未信任电脑或配对凭证不可用` | 解锁设备，点击“信任此电脑”；必要时重新插拔 USB 或删除 `selfIdentity.plist` 后重新信任 |
+| WDA/MJPEG 本地端口占用 | `本地 WDA 或 MJPEG 端口被占用` | 关闭残留的 MSCA、tidevice、ios.exe 或占用 8100/8101/8110 等端口的进程后重试 |
+| WDA Bundle ID 不匹配 | `未找到可启动的 WDA Runner 应用或 Bundle ID 不匹配` | 检查 `backend/config/wda_config.json` 的 `wda_bundle_id` 或 `wda_bundle_id_pattern`，确认设备已安装签名后的 WDA |
+| go-ios tunnel 启动失败 | `go-ios tunnel 启动失败` | iOS 17+ 以管理员身份运行 `scripts/ios-tunnel.bat`，或手动执行 `ios tunnel start` 后重试 |
+| WDA session/control 失败 | `WDA 服务已连接但 session 或控制接口不可用` | 重启设备上的 WDA Runner，确认 `/status` 正常，再重新启动投屏 |
+
+## iOS 手势封装决策
+
+当前不引入 `python-wda`、W3C Actions 或 Airtest 作为主链路依赖。推荐继续维护现有 WDA REST 最小实现，并通过错误分类、日志与操作手册降低排障成本；仅当真实设备手势兼容性继续不足或 REST 维护成本显著上升时，再评估引入第三方封装。
+
 ## 文档
 
 - [项目需求及技术栈概览](doc/项目需求及技术栈概览.md) — 完整的技术设计方案

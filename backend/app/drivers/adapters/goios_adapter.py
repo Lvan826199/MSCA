@@ -14,7 +14,14 @@ import logging
 import os
 import subprocess
 
-from .base import IOSAdapterBase, WDAInfo, is_port_free, kill_process_on_port, load_wda_config
+from .base import (
+    IOSAdapterBase,
+    WDAInfo,
+    diagnose_wda_failure,
+    is_port_free,
+    kill_process_on_port,
+    load_wda_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +48,8 @@ class GoIOSAdapter(IOSAdapterBase):
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         if proc.returncode != 0:
-            raise RuntimeError(f"go-ios 命令失败: {' '.join(cmd)}\n{stderr.decode(errors='replace')}")
+            raw_error = f"go-ios 命令失败: {' '.join(cmd)}\n{stderr.decode(errors='replace')}"
+            raise RuntimeError(diagnose_wda_failure(raw_error).format())
         return stdout.decode(errors='replace')
 
     # ─── 设备列表 ───
@@ -134,7 +142,7 @@ class GoIOSAdapter(IOSAdapterBase):
             kill_process_on_port(port)
             await asyncio.sleep(0.5)
             if not is_port_free(port):
-                raise RuntimeError(f"端口 {port} 仍被占用")
+                raise RuntimeError(diagnose_wda_failure(f"端口 {port} 被占用").format())
 
         if mjpeg_port and not is_port_free(mjpeg_port):
             logger.warning(f"[{self.udid}] MJPEG 端口 {mjpeg_port} 被占用，尝试清理")
@@ -210,8 +218,17 @@ class GoIOSAdapter(IOSAdapterBase):
             await asyncio.sleep(1)
             if self._wda_process.poll() is not None:
                 stderr = self._wda_process.stderr.read().decode(errors='replace') if self._wda_process.stderr else ""
+                raw_error = f"WDA 进程退出: {stderr[:500]}"
+                hint = diagnose_wda_failure(raw_error)
+                logger.error(
+                    "[%s] go-ios WDA 进程退出，分类=%s，错误=%s，建议=%s",
+                    self.udid,
+                    hint.category,
+                    raw_error,
+                    hint.suggestion,
+                )
                 await self.stop_wda()
-                raise RuntimeError(f"WDA 进程退出: {stderr[:500]}")
+                raise RuntimeError(hint.format())
 
             self.wda_info = WDAInfo(host="127.0.0.1", port=port, mjpeg_port=mjpeg_port)
             if await self.check_wda_health():
@@ -221,7 +238,7 @@ class GoIOSAdapter(IOSAdapterBase):
                 return self.wda_info
 
         await self.stop_wda()
-        raise TimeoutError(f"[{self.udid}] WDA 启动超时（30s）")
+        raise TimeoutError(diagnose_wda_failure(f"[{self.udid}] WDA 启动超时（30s）").format())
 
     async def _start_mjpeg_forward(self, mjpeg_port: int, mjpeg_device_port: int) -> None:
         """启动 MJPEG 端口转发（设备端 9100 → 本地 mjpeg_port）。"""
@@ -326,7 +343,7 @@ class GoIOSAdapter(IOSAdapterBase):
             except Exception as e:
                 logger.warning(f"[{self.udid}] 提权启动异常: {e}")
 
-        raise RuntimeError(
+        raw_error = (
             "go-ios tunnel 启动失败（iOS 17+ 必需）。\n"
             "尝试过的方式：\n"
             "  1) --userspace 模式（无需管理员）\n"
@@ -336,6 +353,7 @@ class GoIOSAdapter(IOSAdapterBase):
             "  - macOS/Linux: 运行 scripts/ios-tunnel.sh\n"
             "  - 或手动执行: ios tunnel start（需管理员/sudo）"
         )
+        raise RuntimeError(diagnose_wda_failure(raw_error).format())
 
     async def _try_tunnel_start(
         self, args: list[str], env: dict, desc: str, timeout_s: int = 15,

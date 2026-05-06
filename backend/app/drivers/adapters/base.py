@@ -100,6 +100,86 @@ def kill_process_on_port(port: int) -> None:
         logger.debug(f"清理端口 {port} 失败: {e}")
 
 
+@dataclass(frozen=True)
+class WDAFailureHint:
+    """WDA 故障分类与用户排障提示。"""
+
+    category: str
+    message: str
+    suggestion: str
+
+    def format(self) -> str:
+        return f"{self.message}。排障建议：{self.suggestion}"
+
+
+def diagnose_wda_failure(error: object) -> WDAFailureHint:
+    """将 WDA/tidevice/go-ios 常见错误转换为可定位提示。"""
+    text = str(error).strip()
+    lower = text.lower()
+
+    if "端口" in text and "占用" in text:
+        return WDAFailureHint(
+            "port_occupied",
+            "本地 WDA 或 MJPEG 端口被占用，自动清理后仍无法释放",
+            "关闭残留的 MSCA、tidevice、ios.exe 或占用 8100/8101/8110 等端口的进程后重试",
+        )
+
+    if any(keyword in lower for keyword in ("invalid service", "not trusted", "pair", "lockdown", "usbmux")):
+        return WDAFailureHint(
+            "device_not_trusted",
+            "iOS 设备未信任电脑或配对凭证不可用",
+            "解锁设备并点击“信任此电脑”，必要时重新插拔 USB 或删除 selfIdentity.plist 后重新信任",
+        )
+
+    if any(keyword in lower for keyword in ("expired", "provision", "signature", "codesign", "0xe800801", "0xe800802")):
+        return WDAFailureHint(
+            "wda_signature_expired",
+            "WDA 签名无效或已过期",
+            "使用有效开发者证书重新签名并安装 WDA；免费账号通常 7 天后需要重新签名",
+        )
+
+    if any(keyword in lower for keyword in ("bundle", "xctrunner", "not installed", "no such app", "application lookup")):
+        return WDAFailureHint(
+            "wda_bundle_missing",
+            "未找到可启动的 WDA Runner 应用或 Bundle ID 不匹配",
+            "确认设备已安装签名后的 WDA，并检查 backend/config/wda_config.json 的 wda_bundle_id 或匹配规则",
+        )
+
+    if "tunnel" in lower:
+        return WDAFailureHint(
+            "go_ios_tunnel_failed",
+            "go-ios tunnel 启动失败",
+            "iOS 17+ 请以管理员身份运行 scripts/ios-tunnel.bat，或手动执行 ios tunnel start 后重试",
+        )
+
+    if any(keyword in lower for keyword in ("go-ios 命令失败", "ios.exe", "tidevice", "command not found", "filenotfound")):
+        return WDAFailureHint(
+            "adapter_start_failed",
+            "iOS 适配器启动失败",
+            "确认 tidevice 依赖已安装、bin/ios/ios.exe 存在且 USB 连接正常，再重新启动后端",
+        )
+
+    if any(keyword in lower for keyword in ("timeout", "超时")):
+        return WDAFailureHint(
+            "wda_start_timeout",
+            "WDA 启动超时",
+            "检查设备是否解锁、WDA 是否能在设备上手动启动，以及 8100 端口转发是否正常",
+        )
+
+    if any(keyword in lower for keyword in ("session", "http 404", "http 500", "status")):
+        return WDAFailureHint(
+            "wda_session_failed",
+            "WDA 服务已连接但 session 或控制接口不可用",
+            "重启设备上的 WDA Runner，确认 http://127.0.0.1:8100/status 可访问后重试",
+        )
+
+    return WDAFailureHint(
+        "wda_unknown",
+        "WDA 启动或控制失败",
+        "查看后端日志中的原始错误，重点检查 WDA 签名、设备信任、端口占用和适配器启动状态",
+    )
+
+
 @dataclass
 class WDAInfo:
     """WDA 服务信息。"""

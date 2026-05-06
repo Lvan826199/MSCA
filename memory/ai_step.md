@@ -4,7 +4,48 @@
 
 ---
 
-## 2026-05-02 — 多设备混合投屏 1 小时长稳压测
+## 2026-05-06 — N4/N5/N6 发布收尾与 WDA 排障增强
+
+### 触发背景
+
+用户要求同步文档、提交并推送代码，完成当前发布前收尾任务；在 N2 安装包端到端验证与 N3 多设备 1 小时长稳压测完成后，继续补齐 N4 控制失败与 WDA 排障能力增强、N5 发布文档收尾、N6 iOS 手势封装技术评估。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及范围 |
+|:---|:---|:---|
+| WDA 故障分类 | 新增 WDA/tidevice/go-ios 失败分类与统一排障提示 | `backend/app/drivers/adapters/base.py` |
+| iOS 启动错误提示 | WDA 启动失败时输出分类、原始错误与用户建议 | `backend/app/drivers/ios.py`, `backend/app/drivers/adapters/*.py` |
+| iOS 控制失败提示 | 控制 WebSocket 在 iOS 控制失败时返回可定位排障建议 | `backend/app/websocket/control.py`, `backend/app/drivers/ios.py` |
+| 发布文档收尾 | 补充发布验证清单、WDA 签名/信任/端口/tunnel 排障与 Web 部署说明 | `README.md`, `doc/操作手册.md`, `doc/下一步计划.md`, `doc/开发计划.md`, `dist/README.md` |
+| 手势封装评估 | 明确当前暂不引入 `python-wda`、W3C Actions 或 Airtest 作为主链路依赖 | `README.md`, `doc/操作手册.md`, `doc/下一步计划.md`, `doc/开发计划.md`, `dist/README.md` |
+
+### 验证步骤（已执行）
+
+1. **后端语法检查**：`python -m py_compile backend/app/drivers/ios.py backend/app/websocket/control.py backend/app/drivers/adapters/base.py backend/app/drivers/adapters/tidevice_adapter.py backend/app/drivers/adapters/goios_adapter.py` → 通过，无输出。
+2. **前端构建验证**：`npm run build` → 通过，Vite 构建成功，1028 modules transformed。
+3. **后端打包产物验证**：`npm run backend:verify` → 通过，`/health` 返回 `{"status":"ok"}`，`/api/devices` 返回 200，输出“后端打包验证通过”。
+4. **代码差异检查**：确认本轮代码改动集中在 iOS WDA 失败分类、日志提示与控制失败前端错误返回，未引入新的第三方手势依赖。
+
+### 发现与处理
+
+- WDA 失败已统一归类为端口占用、设备未信任、签名过期、Bundle ID 不匹配、go-ios tunnel 失败、适配器启动失败、WDA 启动超时、session/control 不可用和未知故障。
+- 前端仍沿用字符串错误展示方式，后端直接返回“错误说明 + 排障建议”，避免增加结构化错误对象解析分支。
+- iOS 手势封装结论为暂不引入第三方主链路依赖；继续维护现有 WDA REST 最小实现，仅在真实设备手势兼容性继续不足或 REST 维护成本明显上升时再评估。
+- `dist/README.md` 位于被忽略的 `dist/` 目录，本次仅强制纳入该文档文件，不纳入任何构建二进制产物。
+- N1 真实 iOS 15.1 桌面 UI 全量人工回归仍需按需在真实设备上执行。
+
+### 后续建议
+
+- 发布前若具备真实 iOS 15.1 桌面环境，继续人工回归点击、拖拽、滑动、长按、Home、锁屏与音量键。
+- 若后续出现新的 WDA 失败原始日志，优先补充到 `diagnose_wda_failure()` 分类规则与操作手册排障表。
+
+### 最终提交 hash
+
+- 待提交后回填
+
+---
+
 
 ### 触发背景
 

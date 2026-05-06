@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 import aiohttp
 
-from .adapters.base import IOSAdapterBase
+from .adapters.base import IOSAdapterBase, WDAFailureHint, diagnose_wda_failure
 from .base import AbstractDeviceDriver, ControlEvent, InstallResult, MirrorOptions
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,15 @@ class IOSDriver(AbstractDeviceDriver):
             await self._adapter.start_wda(self._wda_port, self._mjpeg_port)
         except Exception as err:
             _release_wda_port()
-            raise RuntimeError(f"WDA 启动失败: {err}") from err
+            hint = diagnose_wda_failure(err)
+            logger.error(
+                "[%s] WDA 启动失败，分类=%s，原始错误=%s，建议=%s",
+                self.device_id,
+                hint.category,
+                err,
+                hint.suggestion,
+            )
+            raise RuntimeError(hint.format()) from err
 
         self._http = aiohttp.ClientSession()
 
@@ -178,6 +186,30 @@ class IOSDriver(AbstractDeviceDriver):
         self._video_subscribers.clear()
         logger.info("[%s] iOS 投屏已停止", self.device_id)
 
+    def diagnose_control_failure(self, error: object | None = None) -> str:
+        """返回 iOS 控制失败的可定位提示。"""
+        if error is not None:
+            hint = diagnose_wda_failure(error)
+        elif not self._adapter.wda_info or not self._http:
+            hint = WDAFailureHint(
+                "wda_not_ready",
+                "WDA 控制通道未就绪",
+                "先确认设备投屏已成功启动；如仍失败，停止投屏后重新启动 WDA",
+            )
+        elif not self._session_id:
+            hint = WDAFailureHint(
+                "wda_session_failed",
+                "WDA session 不可用，控制指令可能无法执行",
+                "重启设备上的 WDA Runner，确认 /status 正常后重新启动投屏",
+            )
+        else:
+            hint = WDAFailureHint(
+                "wda_control_failed",
+                "WDA 控制接口返回失败",
+                "确认设备未锁屏、WDA Runner 仍在前台可用，并查看后端日志中的 HTTP 状态与响应内容",
+            )
+        return hint.format()
+
     async def _post_wda(self, url: str, payload: dict | None = None) -> bool:
         if not self._http:
             logger.warning("[%s] iOS 控制 HTTP 会话不可用", self.device_id)
@@ -190,11 +222,12 @@ class IOSDriver(AbstractDeviceDriver):
                 logger.debug("[%s] WDA 控制成功: %s", self.device_id, url)
                 return True
             logger.warning(
-                "[%s] WDA 控制失败: HTTP %s %s，响应: %s",
+                "[%s] WDA 控制失败: HTTP %s %s，响应: %s，提示: %s",
                 self.device_id,
                 resp.status,
                 url,
                 text[:500],
+                self.diagnose_control_failure(f"HTTP {resp.status}: {text[:500]}"),
             )
             return False
 
@@ -270,7 +303,12 @@ class IOSDriver(AbstractDeviceDriver):
                 logger.warning("[%s] 未知 iOS 控制指令: %s", self.device_id, event.action)
                 return False
         except Exception as err:
-            logger.error("[%s] iOS 控制指令失败: %s", self.device_id, err)
+            logger.error(
+                "[%s] iOS 控制指令失败: %s，提示: %s",
+                self.device_id,
+                err,
+                self.diagnose_control_failure(err),
+            )
             return False
 
     async def get_screenshot(self) -> bytes:
