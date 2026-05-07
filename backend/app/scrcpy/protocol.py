@@ -265,6 +265,32 @@ DEVICE_MSG_TYPE_ACK_CLIPBOARD = 1
 DEVICE_MSG_TYPE_UHID_OUTPUT = 2
 
 
+def parse_device_message_with_size(data: bytes) -> tuple[dict | None, int]:
+    """解析一条 scrcpy 设备消息，并返回已消费字节数。"""
+    if not data:
+        return None, 0
+
+    msg_type = data[0]
+
+    if msg_type == DEVICE_MSG_TYPE_CLIPBOARD:
+        if len(data) < 5:
+            return None, 0
+        text_len = struct.unpack(">I", data[1:5])[0]
+        size = 5 + text_len
+        if len(data) < size:
+            return None, 0
+        text = data[5:size].decode("utf-8", errors="replace")
+        return {"type": "clipboard", "text": text}, size
+
+    if msg_type == DEVICE_MSG_TYPE_ACK_CLIPBOARD:
+        if len(data) < 9:
+            return None, 0
+        sequence = struct.unpack(">q", data[1:9])[0]
+        return {"type": "ack_clipboard", "sequence": sequence}, 9
+
+    return None, 1
+
+
 def parse_device_message(data: bytes) -> dict | None:
     """解析 scrcpy 设备消息。
 
@@ -275,24 +301,5 @@ def parse_device_message(data: bytes) -> dict | None:
     Returns:
         解析后的消息字典，或 None（未知类型）
     """
-    if not data:
-        return None
-
-    msg_type = data[0]
-
-    if msg_type == DEVICE_MSG_TYPE_CLIPBOARD:
-        if len(data) < 5:
-            return None
-        text_len = struct.unpack(">I", data[1:5])[0]
-        if len(data) < 5 + text_len:
-            return None
-        text = data[5 : 5 + text_len].decode("utf-8", errors="replace")
-        return {"type": "clipboard", "text": text}
-
-    if msg_type == DEVICE_MSG_TYPE_ACK_CLIPBOARD:
-        if len(data) < 9:
-            return None
-        sequence = struct.unpack(">q", data[1:9])[0]
-        return {"type": "ack_clipboard", "sequence": sequence}
-
-    return None
+    message, _ = parse_device_message_with_size(data)
+    return message

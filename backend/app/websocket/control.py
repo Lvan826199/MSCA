@@ -22,6 +22,18 @@ router = APIRouter()
 DEVICE_MSG_POLL_INTERVAL = 0.5
 
 
+def _get_android_manager(driver):
+    if isinstance(driver, IOSDriver):
+        return None
+    return getattr(driver, "_server_manager", None)
+
+
+async def _cancel_and_await_tasks(tasks):
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
 @router.websocket("/ws/control/{device_id}")
 async def control_websocket(websocket: WebSocket, device_id: str):
     """控制指令 WebSocket 端点。
@@ -52,7 +64,7 @@ async def control_websocket(websocket: WebSocket, device_id: str):
                     continue
 
                 # Android 设备走 scrcpy 二进制协议
-                manager = driver._server_manager
+                manager = _get_android_manager(driver)
                 if not manager or not manager.running:
                     await websocket.send_json({"error": "投屏会话未就绪"})
                     continue
@@ -71,7 +83,7 @@ async def control_websocket(websocket: WebSocket, device_id: str):
             while True:
                 try:
                     driver = get_active_driver(device_id)
-                    manager = driver._server_manager
+                    manager = _get_android_manager(driver)
                     if manager and manager.running:
                         msg = await manager.read_device_message()
                         if msg:
@@ -90,12 +102,11 @@ async def control_websocket(websocket: WebSocket, device_id: str):
         done, pending = await asyncio.wait(
             [recv_task, poll_task], return_when=asyncio.FIRST_COMPLETED
         )
-        for task in pending:
-            task.cancel()
+        del done
+        await _cancel_and_await_tasks(pending)
     except Exception as e:
         logger.error(f"[{device_id}] 控制 WS 异常: {e}")
-        recv_task.cancel()
-        poll_task.cancel()
+        await _cancel_and_await_tasks([recv_task, poll_task])
 
     logger.info(f"[{device_id}] 控制 WS 已断开")
 
@@ -116,10 +127,12 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
 
     elif cmd_type == "key":
         action_map = {"down": protocol.ACTION_DOWN, "up": protocol.ACTION_UP}
-        action = action_map.get(data.get("action", ""), protocol.ACTION_DOWN)
+        action_name = data.get("action", "")
         keycode = int(data.get("keycode", 0))
         metastate = int(data.get("metastate", 0))
         repeat = int(data.get("repeat", 0))
+        if action_name in action_map:
+            return protocol.encode_inject_keycode(action_map[action_name], keycode, repeat, metastate)
         return (
             protocol.encode_inject_keycode(protocol.ACTION_DOWN, keycode, repeat, metastate)
             + protocol.encode_inject_keycode(protocol.ACTION_UP, keycode, 0, metastate)

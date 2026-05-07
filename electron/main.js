@@ -30,6 +30,7 @@ function createWindow() {
 }
 
 ipcMain.handle("get-backend-port", () => backendManager.port)
+ipcMain.handle("get-backend-status", () => backendManager.getStatus())
 
 app.whenReady().then(async () => {
   try {

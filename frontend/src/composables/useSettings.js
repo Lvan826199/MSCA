@@ -9,6 +9,7 @@
  */
 
 import { ref, watch } from "vue"
+import { normalizeHttpBaseUrl } from "../utils/connectionUrl.js"
 
 const STORAGE_KEY = "msca-settings"
 
@@ -105,6 +106,20 @@ export function useSettings() {
 
     setGridColumns(cols) {
       settings.value.layout.gridColumns = cols
+    },
+
+    // 连接模式
+    getConnectionSettings() {
+      return { ...settings.value.connection }
+    },
+
+    setConnectionSettings(opts) {
+      if (opts.mode !== undefined) {
+        settings.value.connection.mode = opts.mode
+      }
+      if (opts.remoteUrl !== undefined) {
+        settings.value.connection.remoteUrl = normalizeHttpBaseUrl(opts.remoteUrl)
+      }
     },
 
     // 重置为默认值

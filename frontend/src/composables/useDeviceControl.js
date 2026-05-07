@@ -12,6 +12,7 @@
 
 import { ref, onUnmounted } from "vue"
 import { useConnection } from "./useConnection"
+import { createMouseUpCommand, normalizeControlCommand } from "./controlCommandState.js"
 
 // ─── 浏览器 KeyboardEvent.code → Android keycode 映射表 ───
 
@@ -69,10 +70,13 @@ export function useDeviceControl(deviceId) {
   let _onSyncEvent = null  // 同步事件回调
   let _isSyncReceiving = false  // 防止同步接收时再次广播
 
-  function connect() {
+  async function connect() {
     if (ws) return
 
-    const { toWsUrl } = useConnection()
+    const { ready, toWsUrl } = useConnection()
+    await ready
+    if (ws) return
+
     ws = new WebSocket(toWsUrl(`/ws/control/${deviceId}`))
 
     ws.onopen = () => {
@@ -240,11 +244,7 @@ export function useDeviceControl(deviceId) {
 
   function _emitSync(cmd) {
     if (_isSyncReceiving || !_onSyncEvent || !videoWidth || !videoHeight) return
-    if (cmd.x !== undefined) {
-      _onSyncEvent({ ...cmd, nx: cmd.x / videoWidth, ny: cmd.y / videoHeight })
-    } else {
-      _onSyncEvent(cmd)
-    }
+    _onSyncEvent(normalizeControlCommand(cmd, videoWidth, videoHeight))
   }
 
   function _flushMove() {
@@ -301,9 +301,7 @@ export function useDeviceControl(deviceId) {
     if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
     const pos = canvasToDevice(e.clientX, e.clientY) || _lastDownPos
     if (pos) {
-      const cmd = mouseMoved
-        ? { type: "touch", action: "up", ...pos }
-        : { type: "tap", ...pos }
+      const cmd = createMouseUpCommand(pos)
       send(cmd)
       _emitSync(cmd)
     }
@@ -328,7 +326,11 @@ export function useDeviceControl(deviceId) {
     const touch = e.touches[0]
     if (!touch) return
     const pos = canvasToDevice(touch.clientX, touch.clientY)
-    if (pos) send({ type: "touch", action: "down", ...pos })
+    if (pos) {
+      const cmd = { type: "touch", action: "down", ...pos }
+      send(cmd)
+      _emitSync(cmd)
+    }
   }
 
   function onTouchMove(e) {
@@ -336,7 +338,11 @@ export function useDeviceControl(deviceId) {
     const touch = e.touches[0]
     if (!touch) return
     const pos = canvasToDevice(touch.clientX, touch.clientY)
-    if (pos) send({ type: "touch", action: "move", ...pos })
+    if (pos) {
+      const cmd = { type: "touch", action: "move", ...pos }
+      send(cmd)
+      _emitSync(cmd)
+    }
   }
 
   function onTouchEnd(e) {
@@ -344,7 +350,11 @@ export function useDeviceControl(deviceId) {
     const touch = e.changedTouches[0]
     if (!touch) return
     const pos = canvasToDevice(touch.clientX, touch.clientY)
-    if (pos) send({ type: "touch", action: "up", ...pos })
+    if (pos) {
+      const cmd = { type: "touch", action: "up", ...pos }
+      send(cmd)
+      _emitSync(cmd)
+    }
   }
 
   function preventDefault(e) { e.preventDefault() }

@@ -1,5 +1,6 @@
 import { ref, shallowRef } from "vue"
 import { useConnection } from "./useConnection"
+import { createVideoSocketCloseHandler } from "./videoSocketState.js"
 
 /**
  * 视频解码与 WebSocket 流管理。
@@ -171,10 +172,11 @@ export function useVideoDecoder(deviceId) {
       }
     }
 
-    ws.onclose = () => {
-      connected.value = false
-      cleanup()
-    }
+    ws.onclose = createVideoSocketCloseHandler({
+      clearSocket() { ws = null },
+      setConnected(value) { connected.value = value },
+      cleanup,
+    })
 
     ws.onerror = () => {
       error.value = "WebSocket 连接失败"

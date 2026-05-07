@@ -89,6 +89,7 @@ class ScrcpyServerManager:
         self._screen_width: int = 0
         self._screen_height: int = 0
         self._local_port: int = 0
+        self._device_message_buffer = b""
 
     @property
     def running(self) -> bool:
@@ -326,11 +327,20 @@ class ScrcpyServerManager:
         if not self._control_socket:
             return None
         try:
-            # 非阻塞读取，先尝试读 1 字节类型
+            message, consumed = protocol.parse_device_message_with_size(self._device_message_buffer)
+            if consumed:
+                self._device_message_buffer = self._device_message_buffer[consumed:]
+                return message
+
             data = self._control_socket.recv(4096)
             if not data:
                 return None
-            return protocol.parse_device_message(data)
+            self._device_message_buffer += data
+            message, consumed = protocol.parse_device_message_with_size(self._device_message_buffer)
+            if consumed:
+                self._device_message_buffer = self._device_message_buffer[consumed:]
+                return message
+            return None
         except BlockingIOError:
             return None
         except Exception:
@@ -353,6 +363,7 @@ class ScrcpyServerManager:
 
         self._video_socket = None
         self._control_socket = None
+        self._device_message_buffer = b""
 
         if self._server_stream:
             try:

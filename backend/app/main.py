@@ -7,6 +7,7 @@ from .api.devices import router as devices_router
 from .api.health import router as health_router
 from .api.install import router as install_router
 from .api.mirror import router as mirror_router
+from .api.mirror import shutdown_all_drivers
 from .core.alias_manager import alias_manager
 from .core.device_manager import device_manager
 from .websocket.control import router as ws_control_router
@@ -23,7 +24,8 @@ async def lifespan(app: FastAPI):
     device_manager.start()
     await device_manager.refresh()
     yield
-    device_manager.stop()
+    await shutdown_all_drivers()
+    await device_manager.stop_async()
 
 
 app = FastAPI(title="MSCA Backend", version="0.1.0", lifespan=lifespan)

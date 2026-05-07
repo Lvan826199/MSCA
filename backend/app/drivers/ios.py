@@ -44,6 +44,15 @@ def _jpeg_size(data: bytes) -> dict:
 _port_counter = 0
 
 
+def _is_port_available(port: int) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+
+
 def _allocate_wda_ports() -> tuple[int, int]:
     """分配 WDA API 端口和 MJPEG 端口。"""
     global _port_counter
@@ -52,34 +61,35 @@ def _allocate_wda_ports() -> tuple[int, int]:
     for _ in range(20):
         candidate = IOS_WDA_BASE_PORT + _port_counter * IOS_WDA_PORT_STEP
         _port_counter += 1
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind(("127.0.0.1", candidate))
+        if _is_port_available(candidate):
             wda_port = candidate
             break
-        except OSError:
-            logger.warning("WDA 端口 %s 已被占用，跳过", candidate)
+        logger.warning("WDA 端口 %s 已被占用，跳过", candidate)
 
     if not wda_port:
         wda_port = IOS_WDA_BASE_PORT + _port_counter * IOS_WDA_PORT_STEP
         _port_counter += 1
 
-    mjpeg_port = wda_port + 1
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(("127.0.0.1", mjpeg_port))
-    except OSError:
-        mjpeg_port = wda_port + 2
-        logger.warning("MJPEG 端口 %s 已被占用，改用 %s", wda_port + 1, mjpeg_port)
+    mjpeg_port = 0
+    for offset in range(1, IOS_WDA_PORT_STEP):
+        candidate = wda_port + offset
+        if _is_port_available(candidate):
+            mjpeg_port = candidate
+            if offset > 1:
+                logger.warning("MJPEG 端口 %s 已被占用，改用 %s", wda_port + 1, mjpeg_port)
+            break
+
+    if not mjpeg_port:
+        mjpeg_port = wda_port + IOS_WDA_PORT_STEP - 1
+        logger.warning("MJPEG 端口段均被占用，最后尝试 %s", mjpeg_port)
 
     logger.info("分配端口: WDA=%s, MJPEG=%s", wda_port, mjpeg_port)
     return wda_port, mjpeg_port
 
 
 def _release_wda_port() -> None:
-    global _port_counter
-    if _port_counter > 0:
-        _port_counter -= 1
+    """端口由系统释放；计数器保持递增，避免复用仍被转发进程占用的端口。"""
+    return None
 
 
 class IOSDriver(AbstractDeviceDriver):
@@ -137,24 +147,30 @@ class IOSDriver(AbstractDeviceDriver):
         self._http = aiohttp.ClientSession()
 
         try:
-            self._session_id = await self._create_session()
-            logger.info("[%s] WDA session 创建成功: %s...", self.device_id, self._session_id[:16])
-        except Exception as err:
-            logger.warning("[%s] WDA session 创建失败: %s", self.device_id, err)
+            if not self._adapter.wda_info:
+                raise RuntimeError("WDA 启动后未返回连接信息")
+            try:
+                self._session_id = await self._create_session()
+                logger.info("[%s] WDA session 创建成功: %s...", self.device_id, self._session_id[:16])
+            except Exception as err:
+                logger.warning("[%s] WDA session 创建失败: %s", self.device_id, err)
 
-        try:
-            size = await self._get_screenshot_size()
-            if not size:
-                size = await self._get_window_size()
-            self._screen_width = size.get("width", 375)
-            self._screen_height = size.get("height", 812)
-        except Exception as err:
-            logger.warning("[%s] iOS 屏幕尺寸获取失败，使用默认值: %s", self.device_id, err)
-            self._screen_width, self._screen_height = 375, 812
+            try:
+                size = await self._get_screenshot_size()
+                if not size:
+                    size = await self._get_window_size()
+                self._screen_width = size.get("width", 375)
+                self._screen_height = size.get("height", 812)
+            except Exception as err:
+                logger.warning("[%s] iOS 屏幕尺寸获取失败，使用默认值: %s", self.device_id, err)
+                self._screen_width, self._screen_height = 375, 812
 
-        self._is_mirroring = True
-        self._frame_count = 0
-        self._mjpeg_task = asyncio.create_task(self._read_mjpeg_loop())
+            self._is_mirroring = True
+            self._frame_count = 0
+            self._mjpeg_task = asyncio.create_task(self._read_mjpeg_loop())
+        except Exception:
+            await self.stop_mirroring()
+            raise
 
         logger.info(
             "[%s] iOS 投屏已启动 (%sx%s @ WDA:%s MJPEG:%s)",
@@ -408,17 +424,10 @@ class IOSDriver(AbstractDeviceDriver):
             logger.error("[%s] WDA 信息不可用，无法启动 MJPEG 流", self.device_id)
             return
 
-        mjpeg_port = wda_info.mjpeg_port or self._mjpeg_port
-        if mjpeg_port:
-            stream_url = f"http://127.0.0.1:{mjpeg_port}"
-            logger.info("[%s] MJPEG 流使用独立端口 %s", self.device_id, stream_url)
-        else:
-            wda_base = f"http://{wda_info.host}:{wda_info.port}"
-            stream_url = await self._find_mjpeg_url(wda_base)
-            if not stream_url:
-                logger.error("[%s] 未找到可用的 MJPEG 流端点", self.device_id)
-                return
-            logger.info("[%s] MJPEG 流回退到 WDA 端口 %s", self.device_id, stream_url)
+        stream_url = await self._resolve_mjpeg_url(wda_info)
+        if not stream_url:
+            logger.error("[%s] 未找到可用的 MJPEG 流端点", self.device_id)
+            return
 
         while self._is_mirroring:
             try:
@@ -466,6 +475,20 @@ class IOSDriver(AbstractDeviceDriver):
                 if self._is_mirroring:
                     logger.warning("[%s] MJPEG 流中断: %s，2 秒后重连", self.device_id, err)
                     await asyncio.sleep(2)
+
+    async def _resolve_mjpeg_url(self, wda_info) -> str | None:
+        mjpeg_port = wda_info.mjpeg_port or self._mjpeg_port
+        if mjpeg_port:
+            stream_url = await self._find_mjpeg_url(f"http://127.0.0.1:{mjpeg_port}")
+            if stream_url:
+                logger.info("[%s] MJPEG 流使用独立端口 %s", self.device_id, stream_url)
+                return stream_url
+
+        wda_base = f"http://{wda_info.host}:{wda_info.port}"
+        stream_url = await self._find_mjpeg_url(wda_base)
+        if stream_url:
+            logger.info("[%s] MJPEG 流回退到 WDA 端口 %s", self.device_id, stream_url)
+        return stream_url
 
     async def _find_mjpeg_url(self, base: str) -> str | None:
         candidates = [

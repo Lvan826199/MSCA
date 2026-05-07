@@ -100,6 +100,18 @@ class DeviceManager:
         if self._poll_task:
             self._poll_task.cancel()
             self._poll_task = None
+        self._subscribers.clear()
+
+    async def stop_async(self):
+        if self._poll_task:
+            task = self._poll_task
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            self._poll_task = None
+        self._subscribers.clear()
 
     async def refresh(self) -> list[DeviceInfo]:
         """手动刷新一次设备列表。"""

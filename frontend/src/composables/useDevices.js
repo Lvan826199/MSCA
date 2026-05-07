@@ -1,14 +1,18 @@
 import { ref, readonly } from "vue"
 import { useConnection } from "./useConnection"
+import { buildDevicesApiUrl, shouldOpenDeviceSocket } from "./deviceConnectionState.js"
 
 const devices = ref([])
 let ws = null
 let reconnectTimer = null
 
-function connect() {
-  if (ws && ws.readyState === WebSocket.OPEN) return
+async function connect() {
+  if (!shouldOpenDeviceSocket(ws)) return
 
-  const { toWsUrl } = useConnection()
+  const { ready, toWsUrl } = useConnection()
+  await ready
+  if (!shouldOpenDeviceSocket(ws)) return
+
   try {
     ws = new WebSocket(toWsUrl("/ws/devices"))
   } catch {
@@ -44,9 +48,10 @@ function scheduleReconnect() {
 }
 
 async function fetchDevices() {
-  const { getBackendUrl } = useConnection()
+  const { ready, getBackendUrl } = useConnection()
   try {
-    const res = await fetch(getBackendUrl() + "/api/devices")
+    await ready
+    const res = await fetch(buildDevicesApiUrl(getBackendUrl()))
     const data = await res.json()
     devices.value = data.devices || []
   } catch { /* ignore */ }

@@ -20,19 +20,34 @@ router = APIRouter()
 _drivers: dict[str, AbstractDeviceDriver] = {}
 
 
+def _find_device(device_id: str):
+    for device in device_manager.devices:
+        if device.id == device_id:
+            return device
+    return None
+
+
+async def _stop_driver(device_id: str, driver: AbstractDeviceDriver) -> dict:
+    try:
+        await driver.stop_mirroring()
+        return {"device_id": device_id, "status": "stopped"}
+    except Exception as e:
+        logger.error(f"停止投屏失败 [{device_id}]: {e}")
+        return {"device_id": device_id, "status": "error", "detail": str(e)}
+    finally:
+        _drivers.pop(device_id, None)
+
+
 def get_driver(device_id: str) -> AbstractDeviceDriver:
     """获取或创建设备驱动实例（自动识别平台）。"""
     if device_id not in _drivers:
-        # 查询设备平台
-        device_info = None
-        for d in device_manager.devices:
-            if d.id == device_id:
-                device_info = d
-                break
+        device_info = _find_device(device_id)
+        if not device_info:
+            raise HTTPException(status_code=404, detail=f"设备 {device_id} 不存在或未连接")
 
-        if device_info and device_info.platform == "ios":
+        if device_info.platform == "ios":
             from ..drivers.ios import IOSDriver
-            adapter = device_manager.create_ios_adapter(device_id)
+            adapter = device_manager.create_ios_adapter(device_id, device_info.version)
             _drivers[device_id] = IOSDriver(device_id, adapter)
         else:
             _drivers[device_id] = AndroidDriver(device_id)
@@ -92,12 +107,15 @@ async def start_mirror(device_id: str, req: MirrorStartRequest | None = None):
         return {"status": "started", "device_id": device_id, "width": w, "height": h}
     except FileNotFoundError as e:
         device_manager.mark_mirror_failure(device_id)
+        await _stop_driver(device_id, driver)
         raise HTTPException(status_code=500, detail=str(e)) from None
     except ConnectionError as e:
         device_manager.mark_mirror_failure(device_id)
+        await _stop_driver(device_id, driver)
         raise HTTPException(status_code=502, detail=f"连接设备失败: {e}") from None
     except Exception as e:
         device_manager.mark_mirror_failure(device_id)
+        await _stop_driver(device_id, driver)
         logger.error(f"启动投屏失败 [{device_id}]: {e}")
         raise HTTPException(status_code=500, detail=f"启动投屏失败: {e}") from None
 
@@ -109,9 +127,10 @@ async def stop_mirror(device_id: str):
     if not driver or not driver.is_mirroring:
         return {"status": "not_mirroring", "device_id": device_id}
 
-    await driver.stop_mirroring()
-    _drivers.pop(device_id, None)
-    return {"status": "stopped", "device_id": device_id}
+    result = await _stop_driver(device_id, driver)
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=f"停止投屏失败: {result['detail']}") from None
+    return result
 
 
 @router.get("/mirror/{device_id}/status")
@@ -142,21 +161,19 @@ async def list_sessions():
     return {"sessions": sessions}
 
 
-@router.post("/mirror/stop-all")
-async def stop_all_mirrors():
-    """批量停止所有投屏会话，每个设备独立处理异常。"""
+async def shutdown_all_drivers():
+    """停止并清空所有投屏驱动，供 API 与应用退出复用。"""
     results = []
     device_ids = list(_drivers.keys())
     for device_id in device_ids:
         driver = _drivers.get(device_id)
         if not driver:
             continue
-        try:
-            await driver.stop_mirroring()
-            results.append({"device_id": device_id, "status": "stopped"})
-        except Exception as e:
-            logger.error(f"停止投屏失败 [{device_id}]: {e}")
-            results.append({"device_id": device_id, "status": "error", "detail": str(e)})
-        finally:
-            _drivers.pop(device_id, None)
-    return {"results": results}
+        results.append(await _stop_driver(device_id, driver))
+    return results
+
+
+@router.post("/mirror/stop-all")
+async def stop_all_mirrors():
+    """批量停止所有投屏会话，每个设备独立处理异常。"""
+    return {"results": await shutdown_all_drivers()}

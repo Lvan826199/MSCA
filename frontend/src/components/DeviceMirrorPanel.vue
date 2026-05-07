@@ -58,6 +58,7 @@ import { useConnection } from "@/composables/useConnection"
 import { useDeviceControl } from "@/composables/useDeviceControl"
 import { useSettings } from "@/composables/useSettings"
 import { createMirrorStartTimeout } from "@/utils/mirrorPanel"
+import { MIRROR_CANVAS_MISSING_MESSAGE, shouldFailWhenCanvasMissing } from "@/utils/mirrorStartupState"
 
 const DeviceControlBar = defineAsyncComponent(() => import("./DeviceControlBar.vue"))
 
@@ -158,6 +159,10 @@ async function startMirror() {
     if (canvasEl.value) {
       const decoder = await ensureDecoder()
       decoder.start(canvasEl.value)
+    }
+    if (shouldFailWhenCanvasMissing(canvasEl.value)) {
+      await stopMirror()
+      throw new Error(MIRROR_CANVAS_MISSING_MESSAGE)
     }
   } catch (e) {
     starting.value = false

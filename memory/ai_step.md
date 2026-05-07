@@ -4,6 +4,52 @@
 
 ---
 
+## 2026-05-07 — 隐藏功能性风险集中修复
+
+### 触发背景
+
+用户要求继续完成全项目隐藏功能性风险修复：写入修复计划，修复后端设备与投屏链路、前端功能链路、Electron 与打包链路问题，执行验证并记录操作日志，随后提交并推送代码。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及范围 |
+|:---|:---|:---|
+| 后端生命周期修复 | 补齐未知设备投屏 404、启动失败清理、停止失败移除 driver、应用关闭时释放全部投屏 driver 与设备订阅队列 | `backend/app/api/mirror.py`, `backend/app/main.py`, `backend/app/core/device_manager.py` |
+| Android 投屏/控制修复 | Android scrcpy 启动失败时回滚 `_server_manager`；修复 Back 键编码分支；控制 WS 支持显式 key down/up | `backend/app/drivers/android.py`, `backend/app/websocket/control.py` |
+| iOS 稳健性修复 | WDA/MJPEG 端口分配前探测可用性；WDA 启动无连接信息时明确失败并清理；MJPEG 流支持独立端口和 WDA 端口回退探测 | `backend/app/drivers/ios.py` |
+| scrcpy 协议修复 | 设备消息解析增加半包/粘包缓存，避免 TCP 分片导致剪贴板 ACK 或剪贴板内容丢失 | `backend/app/scrcpy/protocol.py`, `backend/app/scrcpy/server_manager.py` |
+| 前端连接修复 | 连接模式与远程地址持久化打通；远程地址规范化为 HTTP(S)，WebSocket URL 在调用点转换；设备 REST/WS 与控制 WS 等待后端地址初始化 | `frontend/src/composables/useConnection.js`, `frontend/src/composables/useSettings.js`, `frontend/src/composables/useDevices.js`, `frontend/src/composables/useDeviceControl.js`, `frontend/src/views/SettingsView.vue` |
+| 投屏前端修复 | 视频 WS 异常关闭后清理 socket 引用允许重试；Canvas 未挂载时停止后端投屏并展示错误；保留投屏画面等比缩放约束 | `frontend/src/composables/useVideoDecoder.js`, `frontend/src/components/DeviceMirrorPanel.vue`, `frontend/src/utils/*` |
+| 控制前端修复 | 鼠标释放改为发送 `touch up`；触摸 start/move/end 参与同步广播；同步事件携带归一化坐标 | `frontend/src/composables/useDeviceControl.js`, `frontend/src/composables/controlCommandState.js` |
+| Electron 修复 | 后端健康检查失败时停止残留进程；崩溃重启增加次数上限判断；暴露后端运行状态给渲染进程 | `electron/backend-manager.js`, `electron/backend-manager-state.js`, `electron/main.js`, `electron/preload.js` |
+| 文档同步 | 将 R1~R6 隐藏风险修复计划与完成状态写入下一步计划 | `doc/下一步计划.md` |
+
+### 验证步骤（已执行）
+
+1. **前端隐藏风险单元测试**：`node --test "E:/Y_pythonProject/MSCA/frontend/src/utils/connectionUrl.test.js" "E:/Y_pythonProject/MSCA/frontend/src/composables/useSettings.test.js" "E:/Y_pythonProject/MSCA/frontend/src/composables/useConnection.test.js" "E:/Y_pythonProject/MSCA/frontend/src/composables/videoSocketState.test.js" "E:/Y_pythonProject/MSCA/frontend/src/composables/deviceConnectionState.test.js" "E:/Y_pythonProject/MSCA/frontend/src/composables/controlCommandState.test.js" "E:/Y_pythonProject/MSCA/frontend/src/utils/mirrorStartupState.test.js" "E:/Y_pythonProject/MSCA/frontend/src/utils/mirrorPanel.test.js"` → 通过，14 tests pass。
+2. **Electron 单元测试**：`node --test "E:/Y_pythonProject/MSCA/electron/backend-manager-state.test.js"` → 通过，2 tests pass。
+3. **后端单元测试**：`PYTHONPATH="E:/Y_pythonProject/MSCA/backend" uv run --project "E:/Y_pythonProject/MSCA/backend" python -m unittest discover -s "E:/Y_pythonProject/MSCA/backend/tests"` → 通过，17 tests pass。
+4. **前端构建验证**：`npm run build` → 通过，Vite 构建成功，1034 modules transformed。
+5. **后端打包产物验证**：`npm run backend:verify` → 通过，`/health` 返回 `{"status":"ok"}`，`/api/devices` 返回 200，输出“后端打包验证通过”。
+
+### 发现与处理
+
+- 后端风险集中在异常路径释放不完整：本次将 driver 清理放到启动失败、停止失败、stop-all 和 FastAPI lifespan 关闭路径中，避免 scrcpy/WDA 残留。
+- 前端风险集中在连接初始化竞态和异常重试：本次统一连接 URL 规范化与持久化，并让设备、控制和视频链路在异常关闭后可重新启动。
+- Electron 风险集中在后端启动失败和崩溃恢复：本次补齐失败后清理与状态查询，避免健康检查失败后留下不可控子进程。
+- 本轮验证为自动化与打包产物验证；真实设备的长时间投屏和 iOS 15.1 桌面 UI 全量人工回归仍可按发布前验收需要单独执行。
+
+### 后续建议
+
+- 发布前继续按真实设备清单人工回归 Android/iOS 投屏、停止、重试、点击、拖拽、滑动、Home、锁屏、音量键与同步控制。
+- 若 Electron 后端启动失败仍需更强 UI 引导，可在设置页或启动页读取 `window.electronAPI.getBackendStatus()` 并展示修复建议。
+
+### 最终提交 hash
+
+- 待提交后回填。
+
+---
+
 ## 2026-05-06 — 投屏画面缩放与启动超时提示修复
 
 ### 触发背景

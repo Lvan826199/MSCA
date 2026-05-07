@@ -78,11 +78,15 @@ class AndroidDriver(AbstractDeviceDriver):
             return self.device_serial
 
         self._server_manager = ScrcpyServerManager(self.device_serial)
-        await self._server_manager.start(
-            max_size=max(options.width, options.height) or 0,
-            max_fps=options.max_fps,
-            bitrate=options.bitrate,
-        )
+        try:
+            await self._server_manager.start(
+                max_size=max(options.width, options.height) or 0,
+                max_fps=options.max_fps,
+                bitrate=options.bitrate,
+            )
+        except Exception:
+            await self.stop_mirroring()
+            raise
 
         # 启动视频帧读取任务
         self._video_task = asyncio.create_task(self._read_video_loop())
@@ -190,7 +194,7 @@ class AndroidDriver(AbstractDeviceDriver):
             keycode = KEYCODE_MAP.get(key.lower())
             if keycode is None:
                 keycode = params.get("keycode", 0)
-            if action == "back":
+            if key.lower() == "back":
                 return encode_back_or_screen_on(ACTION_DOWN) + encode_back_or_screen_on(ACTION_UP)
             down = encode_inject_keycode(ACTION_DOWN, keycode)
             up = encode_inject_keycode(ACTION_UP, keycode)

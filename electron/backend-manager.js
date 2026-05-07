@@ -2,6 +2,7 @@ const { spawn } = require("child_process")
 const path = require("path")
 const http = require("http")
 const net = require("net")
+const { backendStatus, shouldRestartBackend } = require("./backend-manager-state")
 
 const DEFAULT_PORT = 18000
 const MAX_PORT_ATTEMPTS = 3
@@ -27,12 +28,21 @@ class BackendManager {
     return this._process !== null && !this._process.killed
   }
 
+  getStatus() {
+    return backendStatus({ port: this._port, running: this.isRunning })
+  }
+
   async start() {
     this._stopping = false
     this._port = await this._findAvailablePort()
     await this._spawn()
-    await this._waitForHealth()
-    return this._port
+    try {
+      await this._waitForHealth()
+      return this._port
+    } catch (e) {
+      await this.stop()
+      throw e
+    }
   }
 
   async stop() {
@@ -54,7 +64,11 @@ class BackendManager {
   }
 
   async _handleCrash() {
-    if (this._restartCount >= MAX_RESTART_ATTEMPTS) {
+    if (!shouldRestartBackend({
+      stopping: this._stopping,
+      restartCount: this._restartCount,
+      maxRestartAttempts: MAX_RESTART_ATTEMPTS,
+    })) {
       const { dialog } = require("electron")
       dialog.showErrorBox("MSCA 后端异常", "后端进程多次崩溃，请检查日志或手动重启应用。")
       return
@@ -69,7 +83,8 @@ class BackendManager {
         await this._waitForHealth()
         this._restartCount = 0
       } catch {
-        this._handleCrash()
+        await this.stop()
+        await this._handleCrash()
       }
     }
   }

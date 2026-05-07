@@ -12,7 +12,7 @@
         </el-select>
       </el-form-item>
       <el-form-item v-if="connectionMode === 'remote'" label="远程地址">
-        <el-input v-model="remoteUrl" placeholder="wss://example.com" />
+        <el-input v-model="remoteUrl" placeholder="https://example.com" @blur="onRemoteUrlChange" />
       </el-form-item>
 
       <!-- 投屏参数 -->
@@ -69,11 +69,15 @@
 import { useConnection } from "@/composables/useConnection"
 import { useSettings } from "@/composables/useSettings"
 
-const { mode: connectionMode, remoteUrl, setMode } = useConnection()
+const { mode: connectionMode, remoteUrl, setMode, setRemoteUrl } = useConnection()
 const { settings, resetToDefaults } = useSettings()
 
 function onModeChange(val) {
   setMode(val)
+}
+
+function onRemoteUrlChange() {
+  setRemoteUrl(remoteUrl.value)
 }
 
 function resetSettings() {
