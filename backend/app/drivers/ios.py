@@ -274,10 +274,14 @@ class IOSDriver(AbstractDeviceDriver):
                 if not endpoint:
                     logger.warning("[%s] 未知 iOS 触控动作: %s", self.device_id, action)
                     return False
-                return await self._post_wda(
-                    f"{base}{session_path}{endpoint}",
-                    {"x": event.params.get("x", 0), "y": event.params.get("y", 0)},
-                )
+                payload = {"x": event.params.get("x", 0), "y": event.params.get("y", 0)}
+                success = await self._post_wda(f"{base}{session_path}{endpoint}", payload)
+                if success:
+                    return True
+                if action == "down":
+                    logger.warning("[%s] WDA touch/down 失败，回退到 tap 兼容路径", self.device_id)
+                    return await self._post_wda(f"{base}{session_path}/wda/tap/0", payload)
+                return False
             elif event.action == "swipe":
                 return await self._post_wda(
                     f"{base}{session_path}/wda/dragfromtoforduration",

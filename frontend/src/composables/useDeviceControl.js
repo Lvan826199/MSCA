@@ -301,7 +301,7 @@ export function useDeviceControl(deviceId) {
     if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
     const pos = canvasToDevice(e.clientX, e.clientY) || _lastDownPos
     if (pos) {
-      const cmd = createMouseUpCommand(pos)
+      const cmd = createMouseUpCommand(pos, mouseMoved)
       send(cmd)
       _emitSync(cmd)
     }

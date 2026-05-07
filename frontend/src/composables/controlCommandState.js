@@ -1,5 +1,8 @@
-export function createMouseUpCommand(pos) {
-  return { type: "touch", action: "up", ...pos }
+export function createMouseUpCommand(pos, moved = false) {
+  if (moved) {
+    return { type: "touch", action: "up", ...pos }
+  }
+  return { type: "tap", ...pos }
 }
 
 export function normalizeControlCommand(cmd, width, height) {

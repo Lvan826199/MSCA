@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-05-07 — 投屏正常存档与 iOS Web 控屏兼容修复
+
+### 触发背景
+
+用户确认当前所有投屏正常，要求保存此位置作为后续回退点；同时反馈 iOS 投屏后无法通过 Web 端控屏，提示“iOS 触控动作失败”，并明确要求修复时禁止修改投屏代码。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及范围 |
+|:---|:---|:---|
+| 投屏正常存档 | 在当前提交 `f8ba767` 创建并推送 Git 标签 `mirror-ok-20260507`，作为“投屏正常”回退点 | Git tag |
+| iOS 点击兼容修复 | 简单鼠标点击恢复发送 `tap` 指令，避免 iOS 点击走 `/wda/touch/down|up` 兼容性较差路径 | `frontend/src/composables/controlCommandState.js`, `frontend/src/composables/useDeviceControl.js` |
+| iOS 触控兜底 | WDA `/wda/touch/down` 失败时回退到 `/wda/tap/0`，避免 Web 端简单点击直接报“iOS 触控动作失败” | `backend/app/drivers/ios.py` |
+| 测试覆盖 | 增加前端点击/拖拽命令测试与后端 iOS 控制兜底测试 | `frontend/src/composables/controlCommandState.test.js`, `backend/tests/test_ios_control.py` |
+
+### 验证步骤（已执行）
+
+1. **前端控制相关测试**：`node --test "E:/Y_pythonProject/MSCA/frontend/src/composables/controlCommandState.test.js" "E:/Y_pythonProject/MSCA/frontend/src/composables/useConnection.test.js" "E:/Y_pythonProject/MSCA/frontend/src/composables/useSettings.test.js"` → 通过，5 tests pass。
+2. **后端控制相关测试**：`PYTHONPATH="E:/Y_pythonProject/MSCA/backend" uv run --project "E:/Y_pythonProject/MSCA/backend" python -m unittest "E:/Y_pythonProject/MSCA/backend/tests/test_ios_control.py" "E:/Y_pythonProject/MSCA/backend/tests/test_control_encoding.py"` → 通过，5 tests pass。
+3. **前端构建验证**：`npm run build` → 通过，Vite 构建成功，1034 modules transformed。
+
+### 发现与处理
+
+- 根因是上一轮为了拖拽完整序列，将鼠标释放统一改成 `touch up`，导致普通点击也走 `down → up` 触控端点；真实 iOS WDA 环境下该触控端点兼容性不如 `/wda/tap/0`，因此 Web 控屏点击失败。
+- 本次仅修改控制链路：简单点击走 `tap`，拖拽仍保留 `touch down/move/up`；未修改任何投屏启动、视频流、MJPEG、scrcpy 或画面渲染代码。
+- 如后续投屏问题需要回退，可使用标签 `mirror-ok-20260507` 定位当前投屏正常状态。
+
+### 后续建议
+
+- 用真实 iOS 设备在 Web 端验证：简单点击、拖拽/滑动、Home、锁屏、音量键。
+- 如拖拽仍有兼容问题，下一步只调整 iOS 控制手势映射，不动投屏链路。
+
+### 最终提交 hash
+
+- 本轮修复尚未提交；投屏正常存档标签：`mirror-ok-20260507` → `f8ba767`。
+
+---
+
 ## 2026-05-07 — 隐藏功能性风险集中修复
 
 ### 触发背景
