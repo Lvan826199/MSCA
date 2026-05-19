@@ -259,40 +259,50 @@ class IOSDriver(AbstractDeviceDriver):
 
         try:
             if event.action == "tap":
-                return await self._post_wda(
-                    f"{base}{session_path}/wda/tap/0",
-                    {"x": event.params.get("x", 0), "y": event.params.get("y", 0)},
-                )
-            elif event.action == "touch":
-                action = event.params.get("action", "")
-                endpoint_map = {
-                    "down": "/wda/touch/down",
-                    "move": "/wda/touch/move",
-                    "up": "/wda/touch/up",
+                x = event.params.get("x", 0)
+                y = event.params.get("y", 0)
+                actions_payload = {
+                    "actions": [
+                        {
+                            "type": "pointer",
+                            "id": "finger1",
+                            "parameters": {"pointerType": "touch"},
+                            "actions": [
+                                {"type": "pointerMove", "duration": 0, "x": x, "y": y},
+                                {"type": "pointerDown", "button": 0},
+                                {"type": "pause", "duration": 50},
+                                {"type": "pointerUp", "button": 0},
+                            ],
+                        }
+                    ]
                 }
-                endpoint = endpoint_map.get(action)
-                if not endpoint:
-                    logger.warning("[%s] 未知 iOS 触控动作: %s", self.device_id, action)
-                    return False
-                payload = {"x": event.params.get("x", 0), "y": event.params.get("y", 0)}
-                success = await self._post_wda(f"{base}{session_path}{endpoint}", payload)
-                if success:
-                    return True
-                if action == "down":
-                    logger.warning("[%s] WDA touch/down 失败，回退到 tap 兼容路径", self.device_id)
-                    return await self._post_wda(f"{base}{session_path}/wda/tap/0", payload)
+                return await self._post_wda(f"{base}{session_path}/actions", actions_payload)
+            elif event.action == "touch":
+                logger.warning("[%s] iOS touch down/move/up 已废弃，应由上层聚合为 tap 或 swipe", self.device_id)
                 return False
             elif event.action == "swipe":
-                return await self._post_wda(
-                    f"{base}{session_path}/wda/dragfromtoforduration",
-                    {
-                        "fromX": event.params.get("fromX", 0),
-                        "fromY": event.params.get("fromY", 0),
-                        "toX": event.params.get("toX", 0),
-                        "toY": event.params.get("toY", 0),
-                        "duration": event.params.get("duration", 0.5),
-                    },
-                )
+                from_x = event.params.get("fromX", 0)
+                from_y = event.params.get("fromY", 0)
+                to_x = event.params.get("toX", 0)
+                to_y = event.params.get("toY", 0)
+                duration_ms = int(event.params.get("duration", 0.3) * 1000)
+                actions_payload = {
+                    "actions": [
+                        {
+                            "type": "pointer",
+                            "id": "finger1",
+                            "parameters": {"pointerType": "touch"},
+                            "actions": [
+                                {"type": "pointerMove", "duration": 0, "x": from_x, "y": from_y},
+                                {"type": "pointerDown", "button": 0},
+                                {"type": "pause", "duration": 50},
+                                {"type": "pointerMove", "duration": duration_ms, "x": to_x, "y": to_y},
+                                {"type": "pointerUp", "button": 0},
+                            ],
+                        }
+                    ]
+                }
+                return await self._post_wda(f"{base}{session_path}/actions", actions_payload)
             elif event.action == "keyevent":
                 key = event.params.get("key", "")
                 if key == "home":

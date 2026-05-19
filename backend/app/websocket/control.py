@@ -47,6 +47,7 @@ async def control_websocket(websocket: WebSocket, device_id: str):
 
     async def receive_commands():
         """接收前端控制指令并转发到设备。"""
+        ios_touch_state = {}
         try:
             while True:
                 data = await websocket.receive_json()
@@ -60,7 +61,7 @@ async def control_websocket(websocket: WebSocket, device_id: str):
 
                 # iOS 设备走 WDA REST API
                 if isinstance(driver, IOSDriver):
-                    await _handle_ios_command(driver, cmd_type, data, websocket)
+                    await _handle_ios_command(driver, cmd_type, data, websocket, ios_touch_state)
                     continue
 
                 # Android 设备走 scrcpy 二进制协议
@@ -191,14 +192,62 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
     return None
 
 
-async def _send_ios_event(driver: IOSDriver, event: ControlEvent, websocket, message: str) -> None:
+IOS_TOUCH_MOVE_THRESHOLD = 3
+IOS_TOUCH_DEFAULT_DURATION = 0.3
+
+
+async def _send_ios_event(driver: IOSDriver, event: ControlEvent, websocket, message: str) -> bool:
     success = await driver.send_event(event)
     if not success:
         await websocket.send_json({"error": f"{message}。{driver.diagnose_control_failure()}"})
+    return success
 
 
-async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, websocket):
+def _build_ios_touch_event(action: str, x: int, y: int, touch_state: dict) -> ControlEvent | None:
+    if action == "down":
+        touch_state.clear()
+        touch_state.update({"start_x": x, "start_y": y, "last_x": x, "last_y": y, "moved": False})
+        return None
+
+    if action == "move":
+        if touch_state:
+            start_x = touch_state.get("start_x", x)
+            start_y = touch_state.get("start_y", y)
+            touch_state["last_x"] = x
+            touch_state["last_y"] = y
+            if abs(x - start_x) >= IOS_TOUCH_MOVE_THRESHOLD or abs(y - start_y) >= IOS_TOUCH_MOVE_THRESHOLD:
+                touch_state["moved"] = True
+        return None
+
+    if action != "up":
+        return None
+
+    if not touch_state:
+        return ControlEvent("tap", {"x": x, "y": y})
+
+    start_x = int(touch_state.get("start_x", x))
+    start_y = int(touch_state.get("start_y", y))
+    last_x = int(touch_state.get("last_x", x))
+    last_y = int(touch_state.get("last_y", y))
+    moved = bool(touch_state.get("moved")) or abs(x - start_x) >= IOS_TOUCH_MOVE_THRESHOLD or abs(y - start_y) >= IOS_TOUCH_MOVE_THRESHOLD
+    touch_state.clear()
+
+    if not moved:
+        return ControlEvent("tap", {"x": x, "y": y})
+
+    return ControlEvent("swipe", {
+        "fromX": start_x,
+        "fromY": start_y,
+        "toX": x if x != start_x or y != start_y else last_x,
+        "toY": y if x != start_x or y != start_y else last_y,
+        "duration": IOS_TOUCH_DEFAULT_DURATION,
+    })
+
+
+async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, websocket, touch_state: dict | None = None):
     """处理 iOS 设备控制指令，转换为 WDA REST API 调用。"""
+    if touch_state is None:
+        touch_state = {}
     try:
         if cmd_type == "touch":
             action = data.get("action", "")
@@ -207,12 +256,14 @@ async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, webs
                 return
             x = int(data.get("x", 0))
             y = int(data.get("y", 0))
-            await _send_ios_event(
-                driver,
-                ControlEvent("touch", {"action": action, "x": x, "y": y}),
-                websocket,
-                f"iOS 触控动作失败: {action}",
-            )
+            event = _build_ios_touch_event(action, x, y, touch_state)
+            if event:
+                await _send_ios_event(
+                    driver,
+                    event,
+                    websocket,
+                    "iOS 触控动作失败",
+                )
 
         elif cmd_type == "tap":
             x = int(data.get("x", 0))

@@ -4,6 +4,53 @@
 
 ---
 
+## 2026-05-07 — iOS WDA 改用 W3C Actions API 修复控制兼容
+
+### 触发背景
+
+用户反馈 iOS Web 控屏仍失败，后端日志显示连 `/wda/tap/0` 也返回 HTTP 404 `unknown command`；用户确认 `/status` 可访问，说明 WDA 服务已运行。问题根因是用户 WDA 版本（1035）已移除旧的自定义端点，需改用标准 W3C Actions API。
+
+### 第一轮修复（已完成但仍失败）
+
+在 iOS WebSocket 控制层聚合 `touch down/move/up`，避免直接调用 `/wda/touch/up`；但用户反馈连 `/wda/tap/0` 也返回 404。
+
+### 第二轮修复（当前）
+
+根据 [Appium 文档](https://testsprint360.com/blog/All/migrating-legacy-touch-tap-actions-to-new-w3c-gestures-in-appium)，Appium 2.5+ 已弃用旧 touch/tap actions，改用 W3C Actions API。用户 WDA 版本 1035 已不支持 `/wda/tap/0`、`/wda/dragfromtoforduration` 等旧端点。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及范围 |
+|:---|:---|:---|
+| 根因确认 | 确认当前 WDA 构建连 `/wda/tap/0` 都不支持，需改用标准 W3C Actions API | `backend/app/drivers/ios.py` |
+| iOS 控制修复 | 将 `tap` 和 `swipe` 改用 `POST /session/{id}/actions`，使用 W3C pointer actions 格式 | `backend/app/drivers/ios.py` |
+| 文档同步 | 同步更新 iOS 控制端点说明，避免继续按旧 `/wda/tap/0`、`/wda/touch/*` 方案排障 | `doc/项目核心技术点.md`, `doc/项目需求及技术栈概览.md`, `doc/下一步计划.md` |
+
+### 验证步骤（已执行）
+
+1. **源码旧端点扫描**：`Grep backend/app/**/*.py /wda/tap|/wda/touch|dragfromtoforduration` → 无匹配，后端源码不再调用旧控制端点。
+2. **后端 iOS 控制单元测试**：`PYTHONPATH=backend uv run --project backend python -m unittest backend.tests.test_ios_control` → 通过，5 tests pass。
+3. **前端构建验证**：`npm run build` → 通过，Vite 构建成功，1034 modules transformed。
+
+### 发现与处理
+
+- 用户 WDA 版本 1035 已移除旧的 `/wda/tap/0`、`/wda/touch/*`、`/wda/dragfromtoforduration` 等自定义端点。
+- 改用标准 W3C Actions API：`POST /session/{id}/actions`，payload 格式为 pointer actions 序列。
+- 点击：`pointerMove → pointerDown → pause(50ms) → pointerUp`
+- 滑动：`pointerMove(from) → pointerDown → pause(50ms) → pointerMove(to, duration) → pointerUp`
+- 本次仅修改 iOS 控制端点调用，未修改投屏启动、MJPEG 视频流、scrcpy、前端视频解码或画面渲染代码。
+
+### 后续建议
+
+- 用真实 iOS 设备验证 Web 端点击、拖拽/滑动是否正常响应。
+- 若滑动方向或距离仍不符合预期，调整 W3C Actions 的 duration 或坐标参数。
+
+### 最终提交 hash
+
+- 未提交。
+
+---
+
 ## 2026-05-07 — 投屏正常存档与 iOS Web 控屏兼容修复
 
 ### 触发背景
