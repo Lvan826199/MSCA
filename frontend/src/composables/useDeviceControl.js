@@ -218,7 +218,6 @@ export function useDeviceControl(deviceId) {
       _documentMouseUpHandler = null
     }
     mouseDown = false
-    mouseMoved = false
     _lastDownPos = null
     if (!canvasEl) return
     canvasEl.removeEventListener("mousedown", onMouseDown)
@@ -235,12 +234,10 @@ export function useDeviceControl(deviceId) {
   }
 
   let mouseDown = false
-  let mouseMoved = false
   let _pendingMove = null
   let _rafId = null
   let _documentMouseUpHandler = null
   let _lastDownPos = null
-  const MOUSE_MOVE_THRESHOLD = 3
 
   function _emitSync(cmd) {
     if (_isSyncReceiving || !_onSyncEvent || !videoWidth || !videoHeight) return
@@ -259,7 +256,6 @@ export function useDeviceControl(deviceId) {
   function onMouseDown(e) {
     if (e.button !== 0) return
     mouseDown = true
-    mouseMoved = false
     const pos = canvasToDevice(e.clientX, e.clientY)
     if (pos) {
       _lastDownPos = pos
@@ -279,11 +275,6 @@ export function useDeviceControl(deviceId) {
     if (!mouseDown) return
     const pos = canvasToDevice(e.clientX, e.clientY)
     if (pos) {
-      if (_lastDownPos) {
-        const dx = pos.x - _lastDownPos.x
-        const dy = pos.y - _lastDownPos.y
-        mouseMoved = mouseMoved || Math.hypot(dx, dy) >= MOUSE_MOVE_THRESHOLD
-      }
       _pendingMove = { type: "touch", action: "move", ...pos }
       if (!_rafId) _rafId = requestAnimationFrame(_flushMove)
     }
@@ -301,7 +292,7 @@ export function useDeviceControl(deviceId) {
     if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
     const pos = canvasToDevice(e.clientX, e.clientY) || _lastDownPos
     if (pos) {
-      const cmd = createMouseUpCommand(pos, mouseMoved)
+      const cmd = createMouseUpCommand(pos)
       send(cmd)
       _emitSync(cmd)
     }
@@ -381,7 +372,18 @@ export function useDeviceControl(deviceId) {
   function onKeyUp(e) {
     if (MODIFIER_CODES.has(e.code)) return
     e.preventDefault()
-    // key up 由后端自动配对，无需前端单独发送
+
+    // 与 onKeyDown 配对发送 up，否则后端只注入 ACTION_DOWN，按键停留按下状态
+    const keycode = KEY_CODE_MAP[e.code]
+    if (keycode !== undefined) {
+      send({
+        type: "key",
+        action: "up",
+        keycode,
+        metastate: buildMetaState(e),
+        repeat: 0,
+      })
+    }
   }
 
   // ─── 快捷按键方法 ───
@@ -389,8 +391,9 @@ export function useDeviceControl(deviceId) {
   function sendBack() { send({ type: "back" }) }
   function sendHome() { send({ type: "home" }) }
   function sendPower() { send({ type: "power" }) }
-  function sendVolumeUp() { send({ type: "key", action: "down", keycode: 24 }) }
-  function sendVolumeDown() { send({ type: "key", action: "down", keycode: 25 }) }
+  // 一次性按键不带 action，由后端自动注入 DOWN+UP 配对
+  function sendVolumeUp() { send({ type: "key", keycode: 24 }) }
+  function sendVolumeDown() { send({ type: "key", keycode: 25 }) }
   function sendText(text) { if (text) send({ type: "text", text }) }
   function sendExpandNotification() { send({ type: "expand_notification" }) }
   function sendExpandSettings() { send({ type: "expand_settings" }) }

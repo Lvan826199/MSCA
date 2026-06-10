@@ -49,8 +49,13 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on("before-quit", async () => {
-  await backendManager.stop()
+// Electron 不会等待监听器中的 Promise，需阻止默认退出并在后端停止后手动退出
+let quitting = false
+app.on("before-quit", (event) => {
+  if (quitting) return
+  event.preventDefault()
+  quitting = true
+  backendManager.stop().finally(() => app.exit(0))
 })
 
 app.on("window-all-closed", () => {

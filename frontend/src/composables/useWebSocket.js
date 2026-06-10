@@ -11,7 +11,18 @@ const HEARTBEAT_INTERVAL = 30000
 const RECONNECT_BASE_DELAY = 1000
 
 function connect() {
-  if (ws && ws.readyState === WebSocket.OPEN) return
+  // OPEN / CONNECTING 状态均短路，避免创建第二个 WebSocket 覆盖模块级 ws
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
+
+  // 新建前关闭旧连接并摘除回调，防止旧 socket 泄漏与回调串扰
+  if (ws) {
+    ws.onopen = null
+    ws.onclose = null
+    ws.onerror = null
+    ws.onmessage = null
+    try { ws.close() } catch { /* ignore */ }
+    ws = null
+  }
 
   const { toWsUrl } = useConnection()
   status.value = "connecting"
@@ -71,6 +82,8 @@ function stopHeartbeat() {
 
 function scheduleReconnect() {
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return
+  // 先清理旧定时器，避免重复调度叠加
+  clearTimeout(reconnectTimer)
   const delay = RECONNECT_BASE_DELAY * Math.pow(2, Math.min(reconnectAttempts, 5))
   reconnectAttempts++
   reconnectTimer = setTimeout(connect, delay)

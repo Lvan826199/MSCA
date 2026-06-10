@@ -50,12 +50,18 @@ async def install_app(
     tmp_path = ""
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext, prefix="msca_install_") as tmp:
+            # 进入 with 后立即记录临时文件路径，确保写入中途失败也能清理
+            tmp_path = tmp.name
             while chunk := await file.read(1024 * 1024):
                 tmp.write(chunk)
-            tmp_path = tmp.name
     except HTTPException:
         raise
     except Exception as err:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
         raise HTTPException(status_code=500, detail=f"文件保存失败: {err}") from err
 
     try:

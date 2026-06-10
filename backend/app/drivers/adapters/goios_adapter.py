@@ -46,7 +46,13 @@ class GoIOSAdapter(IOSAdapterBase):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except TimeoutError:
+            # 超时必须杀掉子进程，避免残留
+            proc.kill()
+            await proc.wait()
+            raise
         if proc.returncode != 0:
             raw_error = f"go-ios 命令失败: {' '.join(cmd)}\n{stderr.decode(errors='replace')}"
             raise RuntimeError(diagnose_wda_failure(raw_error).format())
@@ -164,9 +170,10 @@ class GoIOSAdapter(IOSAdapterBase):
     async def _try_relay_mode(self, port: int, mjpeg_port: int, wda_device_port: int, mjpeg_device_port: int) -> bool:
         """尝试 relay 模式：只做端口转发，检测 WDA 是否已在运行。"""
         logger.info(f"[{self.udid}] go-ios 尝试 relay 模式（设备WDA={wda_device_port}）")
+        # 长生命周期进程：输出重定向到 DEVNULL，避免 PIPE 写满导致子进程死锁
         self._tunnel_process = subprocess.Popen(
             [self._ios_bin, "forward", str(port), str(wda_device_port), f"--udid={self.udid}"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
         for _attempt in range(5):
@@ -184,7 +191,7 @@ class GoIOSAdapter(IOSAdapterBase):
                 return True
 
         logger.debug(f"[{self.udid}] relay 模式超时，WDA 未在运行")
-        self._kill_process(self._tunnel_process)
+        await asyncio.to_thread(self._kill_process, self._tunnel_process)
         self._tunnel_process = None
         self.wda_info = None
         return False
@@ -196,9 +203,10 @@ class GoIOSAdapter(IOSAdapterBase):
 
         # 启动 WDA API 端口转发
         logger.info(f"[{self.udid}] 启动 go-ios 端口转发: 本地 {port} → 设备 {wda_device_port}")
+        # 长生命周期进程：输出重定向到 DEVNULL，避免 PIPE 写满导致子进程死锁
         self._tunnel_process = subprocess.Popen(
             [self._ios_bin, "forward", str(port), str(wda_device_port), f"--udid={self.udid}"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
         # 构建 runwda 命令（关键：传递 --bundleid）
@@ -209,16 +217,16 @@ class GoIOSAdapter(IOSAdapterBase):
         else:
             logger.info(f"[{self.udid}] 启动 WDA (go-ios)，使用默认 bundle ID")
 
+        # 长生命周期进程：输出重定向到 DEVNULL，避免 PIPE 写满导致子进程死锁
         self._wda_process = subprocess.Popen(
-            wda_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            wda_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
         # 等待 WDA 就绪
         for _i in range(30):
             await asyncio.sleep(1)
             if self._wda_process.poll() is not None:
-                stderr = self._wda_process.stderr.read().decode(errors='replace') if self._wda_process.stderr else ""
-                raw_error = f"WDA 进程退出: {stderr[:500]}"
+                raw_error = f"WDA 进程退出 (exit code {self._wda_process.returncode})"
                 hint = diagnose_wda_failure(raw_error)
                 logger.error(
                     "[%s] go-ios WDA 进程退出，分类=%s，错误=%s，建议=%s",
@@ -243,16 +251,16 @@ class GoIOSAdapter(IOSAdapterBase):
     async def _start_mjpeg_forward(self, mjpeg_port: int, mjpeg_device_port: int) -> None:
         """启动 MJPEG 端口转发（设备端 9100 → 本地 mjpeg_port）。"""
         logger.info(f"[{self.udid}] 启动 MJPEG forward: 本地 {mjpeg_port} → 设备 {mjpeg_device_port}")
+        # 长生命周期进程：输出重定向到 DEVNULL，避免 PIPE 写满导致子进程死锁
         self._mjpeg_forward_process = subprocess.Popen(
             [self._ios_bin, "forward", str(mjpeg_port), str(mjpeg_device_port), f"--udid={self.udid}"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         await asyncio.sleep(0.5)
         if self._mjpeg_forward_process.poll() is not None:
-            stderr = ""
-            if self._mjpeg_forward_process.stderr:
-                stderr = self._mjpeg_forward_process.stderr.read().decode(errors='replace')
-            logger.warning(f"[{self.udid}] MJPEG forward 进程立即退出: {stderr[:300]}")
+            logger.warning(
+                f"[{self.udid}] MJPEG forward 进程立即退出 (exit code {self._mjpeg_forward_process.returncode})"
+            )
             self._mjpeg_forward_process = None
         else:
             logger.info(f"[{self.udid}] MJPEG forward 已启动 @ {mjpeg_port}")
@@ -271,15 +279,18 @@ class GoIOSAdapter(IOSAdapterBase):
                 pass
 
     async def stop_wda(self) -> None:
-        """停止 WDA、端口转发和 tunnel agent 进程。"""
-        for proc in [self._wda_process, self._tunnel_process, self._mjpeg_forward_process, self._agent_process]:
-            self._kill_process(proc)
+        """停止 WDA 和端口转发进程。
+
+        注意：tunnel agent（_agent_process）是主机级共享守护进程，
+        多台 iOS 17+ 设备共用，此处不能杀掉，否则会打断其他设备的投屏。
+        """
+        for proc in [self._wda_process, self._tunnel_process, self._mjpeg_forward_process]:
+            await asyncio.to_thread(self._kill_process, proc)
         self._wda_process = None
         self._tunnel_process = None
         self._mjpeg_forward_process = None
-        self._agent_process = None
         self.wda_info = None
-        logger.debug(f"[{self.udid}] go-ios 所有子进程已清理")
+        logger.debug(f"[{self.udid}] go-ios 设备级子进程已清理（tunnel agent 保留）")
 
     async def _ensure_tunnel(self) -> None:
         """确保 go-ios tunnel agent 正在运行（iOS 17+ 必需）。
@@ -370,16 +381,16 @@ class GoIOSAdapter(IOSAdapterBase):
             True 表示 tunnel 已就绪
         """
         try:
+            # 长生命周期进程：输出重定向到 DEVNULL，避免 PIPE 写满导致子进程死锁
             self._agent_process = subprocess.Popen(
-                args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
             )
             for i in range(timeout_s):
                 await asyncio.sleep(1)
                 if self._agent_process.poll() is not None:
-                    stderr = ""
-                    if self._agent_process.stderr:
-                        stderr = self._agent_process.stderr.read().decode(errors="replace")
-                    logger.warning(f"[{self.udid}] tunnel ({desc}) 进程退出: {stderr[:500]}")
+                    logger.warning(
+                        f"[{self.udid}] tunnel ({desc}) 进程退出 (exit code {self._agent_process.returncode})"
+                    )
                     self._agent_process = None
                     return False
                 try:
@@ -390,7 +401,7 @@ class GoIOSAdapter(IOSAdapterBase):
                     continue
 
             logger.warning(f"[{self.udid}] tunnel ({desc}) {timeout_s}s 内未就绪")
-            self._kill_process(self._agent_process)
+            await asyncio.to_thread(self._kill_process, self._agent_process)
             self._agent_process = None
             return False
         except Exception as e:

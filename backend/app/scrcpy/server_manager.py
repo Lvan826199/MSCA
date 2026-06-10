@@ -90,6 +90,12 @@ class ScrcpyServerManager:
         self._screen_height: int = 0
         self._local_port: int = 0
         self._device_message_buffer = b""
+        # 视频流读取残余缓冲：超时未读完的字节保留到下次继续补齐，避免帧边界失步
+        self._video_recv_buffer = b""
+        # 当前待读取的 H.264 包大小（meta 已读完但包体未读完时记录）
+        self._pending_packet_size: int | None = None
+        # control socket 发送/读取互斥锁，避免临时阻塞发送与非阻塞 recv 竞态
+        self._control_lock = asyncio.Lock()
 
     @property
     def running(self) -> bool:
@@ -257,6 +263,26 @@ class ScrcpyServerManager:
             data += chunk
         return data
 
+    def _recv_exact_buffered(self, sock: socket.socket, n: int) -> bytes:
+        """从 socket 精确读取 n 字节（带残余缓冲）。
+
+        超时/暂无数据时将已读到的部分字节保留在 `_video_recv_buffer`，
+        下次调用继续补齐，保证 H.264 字节流不丢失、帧边界不失步。
+        """
+        data = self._video_recv_buffer
+        self._video_recv_buffer = b""
+        try:
+            while len(data) < n:
+                chunk = sock.recv(n - len(data))
+                if not chunk:
+                    raise ConnectionError(f"连接断开，已收到 {len(data)}/{n} 字节")
+                data += chunk
+        except (TimeoutError, BlockingIOError, InterruptedError):
+            # 超时/暂无数据：保留残余字节，下次继续补齐
+            self._video_recv_buffer = data
+            raise
+        return data
+
     async def read_video_frame(self) -> bytes | None:
         """读取一个视频帧（带 frame meta）。
 
@@ -265,27 +291,32 @@ class ScrcpyServerManager:
         - packet_size: 4 字节 uint32 大端序
 
         返回原始 H.264 数据包（不含 meta）。
+        超时未读完时通过 `_video_recv_buffer` / `_pending_packet_size`
+        保存读取进度，下次调用从断点继续。
         """
         if not self._video_socket:
             return None
 
         try:
-            # 读取帧元信息（12 字节：pts 8 + size 4）
-            meta = await asyncio.get_event_loop().run_in_executor(
-                None, self._recv_exact, self._video_socket, 12
-            )
-            packet_size = struct.unpack(">I", meta[8:12])[0]
+            if self._pending_packet_size is None:
+                # 读取帧元信息（12 字节：pts 8 + size 4）
+                meta = await asyncio.get_event_loop().run_in_executor(
+                    None, self._recv_exact_buffered, self._video_socket, 12
+                )
+                packet_size = struct.unpack(">I", meta[8:12])[0]
 
-            if packet_size == 0:
-                return None
+                if packet_size == 0:
+                    return None
+                self._pending_packet_size = packet_size
 
-            # 读取 H.264 数据包
+            # 读取 H.264 数据包（可能从上次的断点继续）
             data = await asyncio.get_event_loop().run_in_executor(
-                None, self._recv_exact, self._video_socket, packet_size
+                None, self._recv_exact_buffered, self._video_socket, self._pending_packet_size
             )
+            self._pending_packet_size = None
             return data
         except TimeoutError:
-            # socket 超时，无新帧可读
+            # socket 超时，无新帧可读（残余字节已保留在缓冲区）
             return None
         except (BlockingIOError, OSError) as e:
             if isinstance(e, OSError) and e.errno not in (10035, 11):
@@ -297,22 +328,26 @@ class ScrcpyServerManager:
             return None
 
     async def send_control(self, data: bytes) -> None:
-        """向 control socket 发送控制指令。"""
+        """向 control socket 发送控制指令（加锁串行化，避免与 recv 竞态）。"""
         sock = self._control_socket
         if not sock:
             return
-        try:
-            # control socket 是非阻塞的，临时切为阻塞发送
-            sock.setblocking(True)
-            sock.settimeout(2)
-            await asyncio.get_event_loop().run_in_executor(
-                None, sock.sendall, data
-            )
-            sock.setblocking(False)
-        except OSError:
-            pass  # socket 已关闭，静默忽略
-        except Exception as e:
-            logger.error(f"[{self.device_serial}] 发送控制指令失败: {e}")
+        async with self._control_lock:
+            try:
+                # control socket 是非阻塞的，临时切为阻塞发送，发送后必恢复非阻塞
+                sock.setblocking(True)
+                sock.settimeout(2)
+                try:
+                    await asyncio.to_thread(sock.sendall, data)
+                finally:
+                    try:
+                        sock.setblocking(False)
+                    except OSError:
+                        pass  # socket 已关闭
+            except OSError:
+                pass  # socket 已关闭，静默忽略
+            except Exception as e:
+                logger.error(f"[{self.device_serial}] 发送控制指令失败: {e}")
 
     async def read_device_message(self) -> dict | None:
         """从 control socket 读取设备消息（非阻塞）。
@@ -332,7 +367,9 @@ class ScrcpyServerManager:
                 self._device_message_buffer = self._device_message_buffer[consumed:]
                 return message
 
-            data = self._control_socket.recv(4096)
+            # 与 send_control 共用锁，避免在发送的阻塞窗口期内执行 recv
+            async with self._control_lock:
+                data = self._control_socket.recv(4096)
             if not data:
                 return None
             self._device_message_buffer += data
@@ -364,6 +401,8 @@ class ScrcpyServerManager:
         self._video_socket = None
         self._control_socket = None
         self._device_message_buffer = b""
+        self._video_recv_buffer = b""
+        self._pending_packet_size = None
 
         if self._server_stream:
             try:

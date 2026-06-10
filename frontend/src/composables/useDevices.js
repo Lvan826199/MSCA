@@ -5,13 +5,16 @@ import { buildDevicesApiUrl, shouldOpenDeviceSocket } from "./deviceConnectionSt
 const devices = ref([])
 let ws = null
 let reconnectTimer = null
+// 代际 token：disconnect 后使挂起中的 connect 失效，避免泄漏新建的 WebSocket
+let connectGeneration = 0
 
 async function connect() {
   if (!shouldOpenDeviceSocket(ws)) return
+  const generation = ++connectGeneration
 
   const { ready, toWsUrl } = useConnection()
   await ready
-  if (!shouldOpenDeviceSocket(ws)) return
+  if (generation !== connectGeneration || !shouldOpenDeviceSocket(ws)) return
 
   try {
     ws = new WebSocket(toWsUrl("/ws/devices"))
@@ -34,6 +37,7 @@ async function connect() {
 }
 
 function disconnect() {
+  connectGeneration++
   clearTimeout(reconnectTimer)
   if (ws) {
     ws.onclose = null

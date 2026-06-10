@@ -65,8 +65,12 @@ const iosOnlineCount = computed(() =>
 )
 
 function mirrorAllByPlatform(platform) {
+  // 与 androidDevices/iosDevices 的划分谓词保持一致（非 android 一律视为 iOS）
+  const matchPlatform = platform === "android"
+    ? (d) => d.platform === "android"
+    : (d) => d.platform !== "android"
   const ids = devices.value
-    .filter(d => d.platform === (platform === "android" ? "android" : "ios") && d.status === "online")
+    .filter(d => matchPlatform(d) && d.status === "online")
     .map(d => d.id)
   if (ids.length === 0) return
   router.push({ path: "/mirror", query: { device: ids } })

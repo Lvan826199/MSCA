@@ -116,7 +116,7 @@ const props = defineProps({
 })
 
 const router = useRouter()
-const { getBackendUrl } = useConnection()
+const { ready: connectionReady, getBackendUrl } = useConnection()
 
 const installing = ref(false)
 const fileInput = ref(null)
@@ -225,6 +225,7 @@ async function onFileSelected(e) {
 
 async function fetchKeystores() {
   try {
+    await connectionReady
     const base = getBackendUrl()
     const res = await fetch(`${base}/api/install/keystores`)
     const data = await res.json()
@@ -270,6 +271,7 @@ async function doInstall(file, signingOpts = null) {
       if (signingOpts.key_pass) formData.append("key_pass", signingOpts.key_pass)
     }
 
+    await connectionReady
     const base = getBackendUrl()
     const res = await fetch(`${base}/api/install/${props.device.id}`, {
       method: "POST",

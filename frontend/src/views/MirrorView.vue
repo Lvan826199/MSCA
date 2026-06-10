@@ -82,7 +82,7 @@
 </template>
 
 <script setup>
-import { defineAsyncComponent, ref, computed, onMounted, onUnmounted, watch } from "vue"
+import { defineAsyncComponent, ref, computed, onMounted, onBeforeUnmount, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { ArrowLeft, Plus } from "@element-plus/icons-vue"
 import { useConnection } from "@/composables/useConnection"
@@ -164,8 +164,9 @@ function getDeviceName(deviceId) {
   return name.length > MAX_LEN ? name.slice(0, MAX_LEN - 1) + "…" : name
 }
 
-function getApiBase() {
-  const { getBackendUrl } = useConnection()
+async function getApiBase() {
+  const { ready, getBackendUrl } = useConnection()
+  await ready
   return getBackendUrl()
 }
 
@@ -215,7 +216,7 @@ async function stopAll() {
 
   // 后端批量停止（确保 scrcpy 进程和端口转发释放）
   try {
-    await fetch(`${getApiBase()}/api/mirror/stop-all`, { method: "POST" })
+    await fetch(`${await getApiBase()}/api/mirror/stop-all`, { method: "POST" })
   } catch {
     /* ignore */
   }
@@ -244,7 +245,8 @@ onMounted(() => {
 
 let _cleaning = false
 
-onUnmounted(() => {
+// 必须用 onBeforeUnmount：onUnmounted 执行时模板 ref 已被置 null，panelRefs 为空
+onBeforeUnmount(() => {
   if (_cleaning) return
   _cleaning = true
   disconnectDeviceWs()

@@ -67,16 +67,17 @@ async def _stream_mjpeg(websocket: WebSocket, device_id: str, driver: IOSDriver)
     """iOS MJPEG 流推送。"""
     queue = driver.subscribe_video()
 
-    w, h = driver.screen_size
-    await websocket.send_json({
-        "type": "config",
-        "width": w,
-        "height": h,
-        "codec": "mjpeg",
-    })
-
     frame_count = 0
+    # subscribe 后立即进入 try，保证首次发送失败也会走 finally 取消订阅
     try:
+        w, h = driver.screen_size
+        await websocket.send_json({
+            "type": "config",
+            "width": w,
+            "height": h,
+            "codec": "mjpeg",
+        })
+
         while True:
             try:
                 frame = await asyncio.wait_for(queue.get(), timeout=5.0)
@@ -110,16 +111,17 @@ async def _stream_h264(websocket: WebSocket, device_id: str, driver):
     """Android H.264 流推送。"""
     queue = driver.subscribe_video()
 
-    w, h = driver.screen_size
-    await websocket.send_json({
-        "type": "config",
-        "width": w,
-        "height": h,
-        "codec": "h264",
-    })
-
+    frame_count = 0
+    # subscribe 后立即进入 try，保证首次发送失败也会走 finally 取消订阅
     try:
-        frame_count = 0
+        w, h = driver.screen_size
+        await websocket.send_json({
+            "type": "config",
+            "width": w,
+            "height": h,
+            "codec": "h264",
+        })
+
         config_buf = b""  # 缓冲 SPS/PPS 数据
 
         while True:

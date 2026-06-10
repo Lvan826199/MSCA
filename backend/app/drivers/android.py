@@ -50,6 +50,8 @@ class AndroidDriver(AbstractDeviceDriver):
         self._server_manager: ScrcpyServerManager | None = None
         self._video_task: asyncio.Task | None = None
         self._video_subscribers: list[asyncio.Queue] = []
+        # 投屏生命周期锁：防止并发 start/stop 覆盖 _server_manager 泄漏资源
+        self._lifecycle_lock = asyncio.Lock()
 
     @property
     def is_mirroring(self) -> bool:
@@ -73,28 +75,34 @@ class AndroidDriver(AbstractDeviceDriver):
             self._video_subscribers.remove(q)
 
     async def start_mirroring(self, options: MirrorOptions) -> str:
-        """启动投屏。"""
-        if self.is_mirroring:
+        """启动投屏（加锁防止并发启动覆盖 _server_manager）。"""
+        async with self._lifecycle_lock:
+            if self.is_mirroring:
+                return self.device_serial
+
+            self._server_manager = ScrcpyServerManager(self.device_serial)
+            try:
+                await self._server_manager.start(
+                    max_size=max(options.width, options.height) or 0,
+                    max_fps=options.max_fps,
+                    bitrate=options.bitrate,
+                )
+            except Exception:
+                await self._stop_mirroring_locked()
+                raise
+
+            # 启动视频帧读取任务
+            self._video_task = asyncio.create_task(self._read_video_loop())
+
             return self.device_serial
-
-        self._server_manager = ScrcpyServerManager(self.device_serial)
-        try:
-            await self._server_manager.start(
-                max_size=max(options.width, options.height) or 0,
-                max_fps=options.max_fps,
-                bitrate=options.bitrate,
-            )
-        except Exception:
-            await self.stop_mirroring()
-            raise
-
-        # 启动视频帧读取任务
-        self._video_task = asyncio.create_task(self._read_video_loop())
-
-        return self.device_serial
 
     async def stop_mirroring(self) -> None:
         """停止投屏。"""
+        async with self._lifecycle_lock:
+            await self._stop_mirroring_locked()
+
+    async def _stop_mirroring_locked(self) -> None:
+        """停止投屏的内部实现（调用方需已持有 _lifecycle_lock）。"""
         if self._video_task:
             self._video_task.cancel()
             try:
@@ -127,11 +135,15 @@ class AndroidDriver(AbstractDeviceDriver):
         return False
 
     async def get_screenshot(self) -> bytes:
-        """获取截图（通过 ADB screencap）。"""
-        import adbutils
+        """获取截图（通过 ADB screencap），返回 PNG 字节数据。"""
+        import io
 
         device = adbutils.adb.device(serial=self.device_serial)
-        return await asyncio.to_thread(device.screenshot)
+        # adbutils 返回 PIL Image，转为 PNG bytes 以符合接口契约
+        image = await asyncio.to_thread(device.screenshot)
+        buffer = io.BytesIO()
+        await asyncio.to_thread(image.save, buffer, format="PNG")
+        return buffer.getvalue()
 
     async def _read_video_loop(self) -> None:
         """持续读取视频帧并分发给订阅者。"""

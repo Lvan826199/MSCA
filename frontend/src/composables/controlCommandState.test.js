@@ -3,19 +3,10 @@ import assert from "node:assert/strict"
 
 import { createMouseUpCommand, normalizeControlCommand } from "./controlCommandState.js"
 
-test("createMouseUpCommand sends tap for simple click to keep iOS WDA tap compatibility", () => {
+test("createMouseUpCommand always sends touch up so Android injects ACTION_UP and iOS synthesizes tap/swipe", () => {
   const pos = { x: 10, y: 20, width: 100, height: 200 }
 
-  assert.deepEqual(createMouseUpCommand(pos, false), {
-    type: "tap",
-    ...pos,
-  })
-})
-
-test("createMouseUpCommand sends touch up after drag", () => {
-  const pos = { x: 10, y: 20, width: 100, height: 200 }
-
-  assert.deepEqual(createMouseUpCommand(pos, true), {
+  assert.deepEqual(createMouseUpCommand(pos), {
     type: "touch",
     action: "up",
     ...pos,

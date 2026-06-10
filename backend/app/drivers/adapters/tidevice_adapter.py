@@ -32,28 +32,32 @@ class TideviceAdapter(IOSAdapterBase):
         self._mjpeg_relay_process: subprocess.Popen | None = None
         self._relay_processes: list[subprocess.Popen] = []
 
-    async def list_devices(self) -> list[dict]:
-        """通过 tidevice 列出已连接的 iOS 设备。"""
-        try:
-            import tidevice
+    def _list_devices_sync(self) -> list[dict]:
+        """同步实现：通过 tidevice 列出已连接的 iOS 设备（在线程中执行）。"""
+        import tidevice
 
-            t = tidevice.Usbmux()
-            devices = []
-            for d in t.device_list():
-                udid = d.udid
-                try:
-                    td = tidevice.Device(udid)
-                    info = td.device_info()
-                    devices.append({
-                        "udid": udid,
-                        "name": info.get("DeviceName", ""),
-                        "version": info.get("ProductVersion", ""),
-                        "model": info.get("ProductType", ""),
-                    })
-                except Exception as e:
-                    logger.warning(f"获取 iOS 设备信息失败 [{udid}]: {e}")
-                    devices.append({"udid": udid, "name": "", "version": "", "model": ""})
-            return devices
+        t = tidevice.Usbmux()
+        devices = []
+        for d in t.device_list():
+            udid = d.udid
+            try:
+                td = tidevice.Device(udid)
+                info = td.device_info()
+                devices.append({
+                    "udid": udid,
+                    "name": info.get("DeviceName", ""),
+                    "version": info.get("ProductVersion", ""),
+                    "model": info.get("ProductType", ""),
+                })
+            except Exception as e:
+                logger.warning(f"获取 iOS 设备信息失败 [{udid}]: {e}")
+                devices.append({"udid": udid, "name": "", "version": "", "model": ""})
+        return devices
+
+    async def list_devices(self) -> list[dict]:
+        """通过 tidevice 列出已连接的 iOS 设备（同步调用放入线程，避免阻塞事件循环）。"""
+        try:
+            return await asyncio.to_thread(self._list_devices_sync)
         except ImportError:
             logger.warning("tidevice 未安装，无法发现 iOS 设备")
             return []
@@ -69,7 +73,13 @@ class TideviceAdapter(IOSAdapterBase):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+            except TimeoutError:
+                # 超时必须杀掉子进程，避免残留
+                proc.kill()
+                await proc.wait()
+                raise
             if proc.returncode == 0:
                 logger.info(f"[{self.udid}] WDA 安装成功")
                 return True
@@ -89,13 +99,8 @@ class TideviceAdapter(IOSAdapterBase):
 
         pattern = config.get("wda_bundle_id_pattern", "com.*.xctrunner")
         try:
-            import tidevice
-            td = tidevice.Device(self.udid)
-            bundle_ids = []
-            for binfo in td.installation.iter_installed(attrs=['CFBundleIdentifier']):
-                bid = binfo.get('CFBundleIdentifier', '')
-                if fnmatch.fnmatch(bid, pattern):
-                    bundle_ids.append(bid)
+            # tidevice 同步调用放入线程，避免阻塞事件循环
+            bundle_ids = await asyncio.to_thread(self._detect_wda_bundle_ids_sync, pattern)
             if bundle_ids:
                 # 优先选择非 facebook 的（用户自定义签名的 WDA）
                 bundle_ids.sort(key=lambda x: 'facebook' in x.lower())
@@ -105,6 +110,17 @@ class TideviceAdapter(IOSAdapterBase):
         except Exception as e:
             logger.warning(f"[{self.udid}] WDA bundle ID 检测失败: {e}")
         return ""
+
+    def _detect_wda_bundle_ids_sync(self, pattern: str) -> list[str]:
+        """同步实现：遍历设备已安装应用，匹配 WDA bundle ID（在线程中执行）。"""
+        import tidevice
+        td = tidevice.Device(self.udid)
+        bundle_ids = []
+        for binfo in td.installation.iter_installed(attrs=['CFBundleIdentifier']):
+            bid = binfo.get('CFBundleIdentifier', '')
+            if fnmatch.fnmatch(bid, pattern):
+                bundle_ids.append(bid)
+        return bundle_ids
 
     async def start_wda(self, port: int = 8100, mjpeg_port: int = 0) -> WDAInfo:
         """启动 WDA 代理 + MJPEG 端口转发（含重试）。"""
@@ -164,9 +180,10 @@ class TideviceAdapter(IOSAdapterBase):
     async def _try_relay_mode(self, port: int, mjpeg_port: int, wda_device_port: int, mjpeg_device_port: int) -> bool:
         """尝试 relay 模式：端口转发到设备 WDA 端口，检测 WDA 是否已在运行。"""
         logger.info(f"[{self.udid}] 尝试 relay 模式（检测 WDA 是否已在设备上运行，设备WDA={wda_device_port}）")
+        # 长生命周期进程：输出重定向到 DEVNULL，避免 PIPE 写满导致子进程死锁
         self._proxy_process = subprocess.Popen(
             ["tidevice", "-u", self.udid, "relay", str(port), str(wda_device_port)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
         for _attempt in range(5):
@@ -184,7 +201,7 @@ class TideviceAdapter(IOSAdapterBase):
                 return True
 
         logger.debug(f"[{self.udid}] relay 模式超时，WDA 未在设备上运行")
-        self._kill_process(self._proxy_process)
+        await asyncio.to_thread(self._kill_process_tree, self._proxy_process)
         self._proxy_process = None
         self.wda_info = None
         return False
@@ -199,15 +216,15 @@ class TideviceAdapter(IOSAdapterBase):
         else:
             logger.info(f"[{self.udid}] 启动 wdaproxy，端口 {port}（默认 bundle ID）")
 
+        # 长生命周期进程：输出重定向到 DEVNULL，避免 PIPE 写满导致子进程死锁
         self._proxy_process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
         for _i in range(30):
             await asyncio.sleep(1)
             if self._proxy_process.poll() is not None:
-                stderr = self._proxy_process.stderr.read().decode(errors='replace') if self._proxy_process.stderr else ""
-                raw_error = f"WDA 代理进程退出: {stderr[:500]}"
+                raw_error = f"WDA 代理进程退出 (exit code {self._proxy_process.returncode})"
                 raise RuntimeError(diagnose_wda_failure(raw_error).format())
 
             self.wda_info = WDAInfo(host="127.0.0.1", port=port, mjpeg_port=mjpeg_port)
@@ -222,16 +239,16 @@ class TideviceAdapter(IOSAdapterBase):
     async def _start_mjpeg_relay(self, mjpeg_port: int, mjpeg_device_port: int) -> None:
         """启动 MJPEG 端口转发（设备端 9100 → 本地 mjpeg_port）。"""
         logger.info(f"[{self.udid}] 启动 MJPEG relay: 本地 {mjpeg_port} → 设备 {mjpeg_device_port}")
+        # 长生命周期进程：输出重定向到 DEVNULL，避免 PIPE 写满导致子进程死锁
         self._mjpeg_relay_process = subprocess.Popen(
             ["tidevice", "-u", self.udid, "relay", str(mjpeg_port), str(mjpeg_device_port)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         await asyncio.sleep(0.5)
         if self._mjpeg_relay_process.poll() is not None:
-            stderr = ""
-            if self._mjpeg_relay_process.stderr:
-                stderr = self._mjpeg_relay_process.stderr.read().decode(errors='replace')
-            logger.warning(f"[{self.udid}] MJPEG relay 进程立即退出: {stderr[:300]}")
+            logger.warning(
+                f"[{self.udid}] MJPEG relay 进程立即退出 (exit code {self._mjpeg_relay_process.returncode})"
+            )
             self._mjpeg_relay_process = None
         else:
             logger.info(f"[{self.udid}] MJPEG relay 已启动 @ {mjpeg_port}")
@@ -289,23 +306,28 @@ class TideviceAdapter(IOSAdapterBase):
 
     async def stop_wda(self) -> None:
         """停止 WDA 代理和 MJPEG relay 进程，并清理所有残留子进程。"""
-        self._kill_process_tree(self._proxy_process)
+        # 进程清理含 proc.wait / subprocess.run 等阻塞调用，放入线程执行
+        await asyncio.to_thread(self._kill_process_tree, self._proxy_process)
         self._proxy_process = None
-        self._kill_process_tree(self._mjpeg_relay_process)
+        await asyncio.to_thread(self._kill_process_tree, self._mjpeg_relay_process)
         self._mjpeg_relay_process = None
         self.wda_info = None
 
         # 额外清理残留的 tidevice 子进程（如 wdaproxy 内部启动的 xctest）
-        self._cleanup_orphan_tidevice()
+        await asyncio.to_thread(self._cleanup_orphan_tidevice)
         await asyncio.sleep(0.3)
         logger.debug("[%s] tidevice 所有进程树已清理", self.udid)
 
+    def _get_device_info_sync(self) -> dict:
+        """同步实现：获取设备详细信息（在线程中执行）。"""
+        import tidevice
+        td = tidevice.Device(self.udid)
+        return td.device_info()
+
     async def get_device_info(self) -> dict:
-        """获取设备详细信息。"""
+        """获取设备详细信息（同步调用放入线程，避免阻塞事件循环）。"""
         try:
-            import tidevice
-            td = tidevice.Device(self.udid)
-            info = td.device_info()
+            info = await asyncio.to_thread(self._get_device_info_sync)
             return {
                 "udid": self.udid,
                 "name": info.get("DeviceName", ""),

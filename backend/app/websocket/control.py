@@ -149,8 +149,9 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
         y = int(data.get("y", 0))
         sw = int(data.get("width", w))
         sh = int(data.get("height", h))
-        h_scroll = int(data.get("hScroll", 0))
-        v_scroll = int(data.get("vScroll", 0))
+        # 前端发送的滚动量（如 ±120）归一化到 [-1, 1]，由协议层转 i16 定点
+        h_scroll = max(-1.0, min(1.0, float(data.get("hScroll", 0))))
+        v_scroll = max(-1.0, min(1.0, float(data.get("vScroll", 0))))
         return protocol.encode_inject_scroll(x, y, sw, sh, h_scroll, v_scroll)
 
     elif cmd_type == "back":

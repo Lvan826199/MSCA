@@ -74,6 +74,8 @@ class DeviceManager:
         self._ios_unavailable: set[str] = set()
         # 缓存已知 ADB 设备的属性（model, version, resolution），避免每次轮询都执行 shell 命令
         self._adb_device_cache: dict[str, dict] = {}
+        # 后台通知任务的强引用集合，防止 create_task 产物被 GC 提前回收
+        self._notify_tasks: set[asyncio.Task] = set()
 
     @property
     def devices(self) -> list[DeviceInfo]:
@@ -172,9 +174,10 @@ class DeviceManager:
 
         changed = current_ids != old_ids
         if not changed:
-            old_status = {device_id: d.status for device_id, d in self._devices.items()}
-            new_status = {d.id: d.status for d in current}
-            changed = old_status != new_status
+            # 状态或别名变化也需要推送（别名热加载依赖此比较）
+            old_state = {device_id: (d.status, d.alias) for device_id, d in self._devices.items()}
+            new_state = {d.id: (d.status, d.alias) for d in current}
+            changed = old_state != new_state
         if not changed:
             return
 
@@ -201,13 +204,14 @@ class DeviceManager:
                         version = d.prop.get("ro.build.version.release", "")
                         size = d.shell("wm size").strip()
                         resolution = size.split(": ")[-1] if ": " in size else ""
+                        # 仅在获取成功时写缓存，失败留待下次轮询重试
+                        self._adb_device_cache[serial] = {
+                            "model": model,
+                            "version": version,
+                            "resolution": resolution,
+                        }
                     except Exception:
                         model, version, resolution = "", "", ""
-                    self._adb_device_cache[serial] = {
-                        "model": model,
-                        "version": version,
-                        "resolution": resolution,
-                    }
 
                 devices.append(DeviceInfo(
                     id=serial,
@@ -283,6 +287,12 @@ class DeviceManager:
 
         return devices
 
+    def _schedule_notify(self) -> None:
+        """调度后台通知任务，保存强引用避免被 GC 提前回收。"""
+        task = asyncio.create_task(self._notify())
+        self._notify_tasks.add(task)
+        task.add_done_callback(self._notify_tasks.discard)
+
     def mark_mirror_success(self, device_id: str) -> None:
         if device_id not in self._devices or self._devices[device_id].platform != "ios":
             return
@@ -290,7 +300,7 @@ class DeviceManager:
         if device_id in self._ios_unavailable:
             self._ios_unavailable.remove(device_id)
             self._devices[device_id].status = "online"
-            asyncio.create_task(self._notify())
+            self._schedule_notify()
 
     def mark_mirror_failure(self, device_id: str) -> None:
         if device_id not in self._devices or self._devices[device_id].platform != "ios":
@@ -300,7 +310,7 @@ class DeviceManager:
         if count >= IOS_UNAVAILABLE_FAILURE_THRESHOLD:
             self._ios_unavailable.add(device_id)
             self._devices[device_id].status = "unavailable"
-            asyncio.create_task(self._notify())
+            self._schedule_notify()
 
     def create_ios_adapter(self, udid: str, version: str = ""):
         """为指定 iOS 设备创建适配器实例，根据版本自动选择。

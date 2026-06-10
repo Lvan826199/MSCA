@@ -12,11 +12,12 @@ async def ws_devices(websocket: WebSocket):
     await websocket.accept()
     queue = device_manager.subscribe()
 
-    # 连接后立即推送当前设备列表
-    current = [d.model_dump() for d in device_manager.devices]
-    await websocket.send_text(json.dumps({"type": "devices", "data": current}))
-
+    # subscribe 后立即进入 try，保证任何发送失败都会走 finally 取消订阅
     try:
+        # 连接后立即推送当前设备列表
+        current = [d.model_dump() for d in device_manager.devices]
+        await websocket.send_text(json.dumps({"type": "devices", "data": current}))
+
         while True:
             data = await queue.get()
             await websocket.send_text(json.dumps({"type": "devices", "data": data}))

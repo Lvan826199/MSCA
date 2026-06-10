@@ -108,6 +108,8 @@ class IOSDriver(AbstractDeviceDriver):
         self._screen_height = 0
         self._http: aiohttp.ClientSession | None = None
         self._frame_count = 0
+        # 投屏生命周期锁：防止并发 start/stop 重复分配端口、泄漏资源
+        self._lifecycle_lock = asyncio.Lock()
 
     @property
     def is_mirroring(self) -> bool:
@@ -119,70 +121,76 @@ class IOSDriver(AbstractDeviceDriver):
 
     async def start_mirroring(self, options: MirrorOptions) -> str:
         del options
-        if self._is_mirroring:
+        async with self._lifecycle_lock:
+            if self._is_mirroring:
+                return f"ios-{self.device_id}"
+
+            self._wda_port, self._mjpeg_port = _allocate_wda_ports()
+            logger.info(
+                "[%s] 分配端口: WDA=%s, MJPEG=%s",
+                self.device_id,
+                self._wda_port,
+                self._mjpeg_port,
+            )
+
+            try:
+                await self._adapter.start_wda(self._wda_port, self._mjpeg_port)
+            except Exception as err:
+                _release_wda_port()
+                hint = diagnose_wda_failure(err)
+                logger.error(
+                    "[%s] WDA 启动失败，分类=%s，原始错误=%s，建议=%s",
+                    self.device_id,
+                    hint.category,
+                    err,
+                    hint.suggestion,
+                )
+                raise RuntimeError(hint.format()) from err
+
+            self._http = aiohttp.ClientSession()
+
+            try:
+                if not self._adapter.wda_info:
+                    raise RuntimeError("WDA 启动后未返回连接信息")
+                try:
+                    self._session_id = await self._create_session()
+                    logger.info("[%s] WDA session 创建成功: %s...", self.device_id, self._session_id[:16])
+                except Exception as err:
+                    logger.warning("[%s] WDA session 创建失败: %s", self.device_id, err)
+
+                try:
+                    size = await self._get_screenshot_size()
+                    if not size:
+                        size = await self._get_window_size()
+                    self._screen_width = size.get("width", 375)
+                    self._screen_height = size.get("height", 812)
+                except Exception as err:
+                    logger.warning("[%s] iOS 屏幕尺寸获取失败，使用默认值: %s", self.device_id, err)
+                    self._screen_width, self._screen_height = 375, 812
+
+                self._is_mirroring = True
+                self._frame_count = 0
+                self._mjpeg_task = asyncio.create_task(self._read_mjpeg_loop())
+            except Exception:
+                await self._stop_mirroring_locked()
+                raise
+
+            logger.info(
+                "[%s] iOS 投屏已启动 (%sx%s @ WDA:%s MJPEG:%s)",
+                self.device_id,
+                self._screen_width,
+                self._screen_height,
+                self._wda_port,
+                self._mjpeg_port,
+            )
             return f"ios-{self.device_id}"
 
-        self._wda_port, self._mjpeg_port = _allocate_wda_ports()
-        logger.info(
-            "[%s] 分配端口: WDA=%s, MJPEG=%s",
-            self.device_id,
-            self._wda_port,
-            self._mjpeg_port,
-        )
-
-        try:
-            await self._adapter.start_wda(self._wda_port, self._mjpeg_port)
-        except Exception as err:
-            _release_wda_port()
-            hint = diagnose_wda_failure(err)
-            logger.error(
-                "[%s] WDA 启动失败，分类=%s，原始错误=%s，建议=%s",
-                self.device_id,
-                hint.category,
-                err,
-                hint.suggestion,
-            )
-            raise RuntimeError(hint.format()) from err
-
-        self._http = aiohttp.ClientSession()
-
-        try:
-            if not self._adapter.wda_info:
-                raise RuntimeError("WDA 启动后未返回连接信息")
-            try:
-                self._session_id = await self._create_session()
-                logger.info("[%s] WDA session 创建成功: %s...", self.device_id, self._session_id[:16])
-            except Exception as err:
-                logger.warning("[%s] WDA session 创建失败: %s", self.device_id, err)
-
-            try:
-                size = await self._get_screenshot_size()
-                if not size:
-                    size = await self._get_window_size()
-                self._screen_width = size.get("width", 375)
-                self._screen_height = size.get("height", 812)
-            except Exception as err:
-                logger.warning("[%s] iOS 屏幕尺寸获取失败，使用默认值: %s", self.device_id, err)
-                self._screen_width, self._screen_height = 375, 812
-
-            self._is_mirroring = True
-            self._frame_count = 0
-            self._mjpeg_task = asyncio.create_task(self._read_mjpeg_loop())
-        except Exception:
-            await self.stop_mirroring()
-            raise
-
-        logger.info(
-            "[%s] iOS 投屏已启动 (%sx%s @ WDA:%s MJPEG:%s)",
-            self.device_id,
-            self._screen_width,
-            self._screen_height,
-            self._wda_port,
-            self._mjpeg_port,
-        )
-        return f"ios-{self.device_id}"
-
     async def stop_mirroring(self) -> None:
+        async with self._lifecycle_lock:
+            await self._stop_mirroring_locked()
+
+    async def _stop_mirroring_locked(self) -> None:
+        """停止投屏的内部实现（调用方需已持有 _lifecycle_lock）。"""
         self._is_mirroring = False
 
         if self._mjpeg_task:

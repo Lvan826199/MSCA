@@ -189,25 +189,36 @@ def encode_inject_touch(
     )
 
 
+def _float_to_i16fp(value: float) -> int:
+    """将 [-1.0, 1.0] 浮点滚动量转为 i16 定点数（scrcpy ≥1.25 协议）。"""
+    clamped = max(-1.0, min(1.0, value))
+    return max(-0x8000, min(0x7FFF, round(clamped * 0x7FFF)))
+
+
 def encode_inject_scroll(
     x: int,
     y: int,
     screen_width: int,
     screen_height: int,
-    h_scroll: int,
-    v_scroll: int,
+    h_scroll: float,
+    v_scroll: float,
     buttons: int = 0,
 ) -> bytes:
-    """编码滚动注入指令。"""
+    """编码滚动注入指令。
+
+    scrcpy ≥1.25 格式（共 21 字节）：
+    type(1) + position(x:4 + y:4 + w:2 + h:2) + hscroll(2) + vscroll(2) + buttons(4)
+    其中 hscroll/vscroll 为 i16 定点数（-1.0~1.0 映射 -32768~32767）。
+    """
     return struct.pack(
-        ">BiiHHiiI",
+        ">BiiHHhhI",
         CONTROL_TYPE_INJECT_SCROLL,
         x,
         y,
         screen_width,
         screen_height,
-        h_scroll,
-        v_scroll,
+        _float_to_i16fp(h_scroll),
+        _float_to_i16fp(v_scroll),
         buttons,
     )
 

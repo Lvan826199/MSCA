@@ -30,6 +30,8 @@ export function useVideoDecoder(deviceId) {
   let timestampCounter = 0
   let codecMode = "h264" // "h264" | "mjpeg"
   let lastSpsData = null // 缓存上次的 SPS，用于检测旋转
+  let mjpegSeq = 0 // MJPEG 帧递增序号
+  let mjpegDrawnSeq = 0 // 已绘制的最新 MJPEG 帧序号
 
   // ─── NAL 解析工具 ───
 
@@ -298,10 +300,13 @@ export function useVideoDecoder(deviceId) {
     const canvas = canvasRef.value
     if (!canvas) return
     const ctx = canvas.getContext("2d")
+    const seq = ++mjpegSeq
 
     const blob = new Blob([buffer], { type: "image/jpeg" })
     createImageBitmap(blob).then((bmp) => {
-      if (!canvasRef.value) { bmp.close(); return }
+      // createImageBitmap 完成顺序不保证，丢弃过期帧避免旧帧覆盖新帧
+      if (!canvasRef.value || seq <= mjpegDrawnSeq) { bmp.close(); return }
+      mjpegDrawnSeq = seq
       if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
         canvas.width = bmp.width
         canvas.height = bmp.height
@@ -311,6 +316,7 @@ export function useVideoDecoder(deviceId) {
       ctx.drawImage(bmp, 0, 0)
       bmp.close()
       frameCount++
+      if (error.value) error.value = null
     }).catch(() => {})
   }
 
@@ -336,6 +342,8 @@ export function useVideoDecoder(deviceId) {
           }
           ctx.drawImage(frame, 0, 0)
           frame.close()
+          // 解码恢复成功，清除残留错误状态
+          if (error.value) error.value = null
         },
         error: (e) => {
           error.value = `解码错误: ${e.message}`
@@ -382,6 +390,10 @@ export function useVideoDecoder(deviceId) {
     clearInterval(fpsTimer)
     fpsTimer = null
     resetDecoder()
+    // 清空 canvas 引用，避免 stop 后未完成的异步绘制写入旧节点
+    canvasRef.value = null
+    mjpegSeq = 0
+    mjpegDrawnSeq = 0
   }
 
   return {

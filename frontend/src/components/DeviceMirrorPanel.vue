@@ -37,7 +37,7 @@
       v-if="mirroring"
       @back="syncAction('sendBack')"
       @home="syncAction('sendHome')"
-      @recents="syncAction('send', { type: 'key', action: 'down', keycode: 187 })"
+      @recents="syncAction('send', { type: 'key', keycode: 187 })"
       @volume-up="syncAction('sendVolumeUp')"
       @volume-down="syncAction('sendVolumeDown')"
       @power="syncAction('sendPower')"
@@ -99,8 +99,9 @@ const MIRROR_START_TIMEOUT_MS = 30_000
 // 投屏参数从持久化设置读取
 const { getMirrorOptions } = useSettings()
 
-function getApiBase() {
-  const { getBackendUrl } = useConnection()
+async function getApiBase() {
+  const { ready, getBackendUrl } = useConnection()
+  await ready
   return getBackendUrl()
 }
 
@@ -122,10 +123,16 @@ async function startMirror() {
   starting.value = true
   errorMsg.value = ""
 
+  // 重试路径：先清理旧解码器与触控绑定，
+  // 避免错误分支卸载 canvas 后解码/触控仍绑定在旧 DOM 节点上
+  control.unbindCanvas()
+  controlBound = false
+  stopDecoder()
+
   const startTimeout = createMirrorStartTimeout(MIRROR_START_TIMEOUT_MS)
 
   try {
-    const res = await fetch(`${getApiBase()}/api/mirror/${props.deviceId}/start`, {
+    const res = await fetch(`${await getApiBase()}/api/mirror/${props.deviceId}/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: startTimeout.signal,
@@ -159,6 +166,8 @@ async function startMirror() {
     if (canvasEl.value) {
       const decoder = await ensureDecoder()
       decoder.start(canvasEl.value)
+      // 重试时视频尺寸可能不变（watch 不触发），需立即重绑触控
+      bindControlIfReady()
     }
     if (shouldFailWhenCanvasMissing(canvasEl.value)) {
       await stopMirror()
@@ -182,7 +191,7 @@ async function stopMirror() {
   emit("stopped", props.deviceId)
 
   try {
-    await fetch(`${getApiBase()}/api/mirror/${props.deviceId}/stop`, { method: "POST" })
+    await fetch(`${await getApiBase()}/api/mirror/${props.deviceId}/stop`, { method: "POST" })
   } catch {
     /* ignore */
   }
@@ -212,6 +221,17 @@ control.setSyncCallback((evt) => {
 
 // 视频尺寸就绪/变化后绑定或更新触控事件
 let controlBound = false
+
+function bindControlIfReady() {
+  if (controlBound) return
+  const w = videoWidth.value
+  const h = videoHeight.value
+  if (w && h && canvasEl.value) {
+    control.bindCanvas(canvasEl.value, w, h)
+    controlBound = true
+  }
+}
+
 watch([videoWidth, videoHeight], ([w, h]) => {
   if (w && h && canvasEl.value) {
     if (!controlBound) {

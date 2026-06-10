@@ -16,6 +16,62 @@ class ChunkedSocket:
         return self.chunks.pop(0)
 
 
+class TimeoutChunkSocket:
+    """模拟分片 + 超时的 video socket。chunks 中 None 表示一次超时。"""
+
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+
+    def recv(self, size):
+        if not self.chunks:
+            raise TimeoutError()
+        item = self.chunks.pop(0)
+        if item is None:
+            raise TimeoutError()
+        if len(item) > size:
+            # 超出请求量的部分放回队头
+            self.chunks.insert(0, item[size:])
+            item = item[:size]
+        return item
+
+
+class VideoFrameBufferTests(unittest.IsolatedAsyncioTestCase):
+    """视频帧读取超时不应丢弃已读字节，否则 H.264 帧边界永久失步。"""
+
+    async def test_read_video_frame_resumes_after_timeout_in_meta(self):
+        frame_data = b"ABCD"
+        meta = struct.pack(">QI", 1000, len(frame_data))
+        manager = ScrcpyServerManager("device-1")
+        # meta 前 5 字节 → 超时 → meta 剩余部分 + 帧数据
+        manager._video_socket = TimeoutChunkSocket([meta[:5], None, meta[5:], frame_data])
+
+        self.assertIsNone(await manager.read_video_frame())
+        self.assertEqual(await manager.read_video_frame(), frame_data)
+
+    async def test_read_video_frame_resumes_after_timeout_in_packet(self):
+        frame_data = b"ABCDEFGH"
+        meta = struct.pack(">QI", 1000, len(frame_data))
+        manager = ScrcpyServerManager("device-1")
+        # meta 完整 → 包体前 3 字节 → 超时 → 包体剩余部分
+        manager._video_socket = TimeoutChunkSocket([meta, frame_data[:3], None, frame_data[3:]])
+
+        self.assertIsNone(await manager.read_video_frame())
+        self.assertEqual(await manager.read_video_frame(), frame_data)
+
+    async def test_read_video_frame_reads_consecutive_frames(self):
+        first = b"AAAA"
+        second = b"BB"
+        stream = (
+            struct.pack(">QI", 1, len(first)) + first
+            + struct.pack(">QI", 2, len(second)) + second
+        )
+        manager = ScrcpyServerManager("device-1")
+        manager._video_socket = TimeoutChunkSocket([stream])
+
+        self.assertEqual(await manager.read_video_frame(), first)
+        self.assertEqual(await manager.read_video_frame(), second)
+
+
 class DeviceMessageBufferTests(unittest.IsolatedAsyncioTestCase):
     async def test_read_device_message_waits_for_complete_clipboard_message(self):
         text = "hello"
