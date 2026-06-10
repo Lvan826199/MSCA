@@ -807,3 +807,41 @@ curl http://127.0.0.1:$(cat .backend-port)/health
 git add <files>
 git commit -m "type(scope): subject"
 ```
+
+---
+
+## 2026-06-10 — 全项目 bug 排查与修复（后端/前端/Electron 三线并行）
+
+### 触发背景
+
+用户要求：①将全部 Bash 权限与文件读写权限写入项目 `.claude/settings.json`；②对整个项目执行 bug 排查与修复。采用 3 个并行审查代理（后端 Python / 前端 Vue / Electron 主进程）逐文件通读排查，再由 3 个并行修复代理核实后修复，最后统一验证。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 权限配置 | 新建项目级 settings.json，allow: Bash/Read/Write/Edit（工具名写法即允许全部操作，等价 `Bash(*)`） | `.claude/settings.json` |
+| 后端-高危 | tidevice `_try_relay_mode` 调用不存在的 `_kill_process` → `_kill_process_tree`（WDA 冷启动必崩） | `tidevice_adapter.py` |
+| 后端-高危 | scrcpy scroll 编码 `>BiiHHiiI`(25B) → `>BiiHHhhI`(21B，i16 定点)，滚动量归一化，否则一次滚动即令控制流永久错位 | `scrcpy/protocol.py`, `websocket/control.py` |
+| 后端-高危 | `_recv_exact` 超时丢弃半包导致 H.264 帧边界永久失步 → 实例级缓冲续读（`_video_recv_buffer` + `_pending_packet_size`） | `scrcpy/server_manager.py` |
+| 后端-中危 | send_control 阻塞模式 try/finally 恢复 + asyncio.Lock 串行化；驱动 start/stop 加 `_lifecycle_lock` 防并发双启动；go-ios stop_wda 不再杀共享 tunnel agent；长进程 stdout/stderr PIPE→DEVNULL 防写满死锁；tidevice 同步调用包 to_thread；别名热加载纳入变更比较；WS 订阅 subscribe 后立即进 try 防泄漏 | `server_manager.py`, `android.py`, `ios.py`, `goios_adapter.py`, `tidevice_adapter.py`, `device_manager.py`, `websocket/devices.py`, `websocket/video.py` |
+| 后端-低危 | 子进程超时补 kill、create_task 强引用、临时文件泄漏、ADB 属性失败不缓存、get_screenshot 返回 bytes | `install.py`, `device_manager.py`, `android.py` 等 |
+| 前端-高危 | 单击改发 `touch up`（后端 iOS 会按位移自动合成 tap/swipe；Android 无 tap 分支致触点永不释放+报错条）；按键改为真配对/缺省 action 由后端配对（原先只发 down 致长按错乱）；解码错误后重试走完整 stop→start 重建并重绑触控、解码恢复清空 error | `controlCommandState.js`, `useDeviceControl.js`, `useVideoDecoder.js`, `DeviceMirrorPanel.vue` |
+| 前端-中危 | MirrorView 卸载清理改 onBeforeUnmount（原为死代码，离开路由不停投屏）；useWebSocket CONNECTING 短路+旧 socket 摘除+重连定时器去重；API 调用先 await ready（Electron 生产 file:// 下空 backendUrl 必失败） | `MirrorView.vue`, `useWebSocket.js`, `DeviceMirrorPanel.vue`, `DeviceCard.vue` |
+| 前端-低危 | MJPEG 帧序号防乱序、HomeView iOS 谓词统一、useDevices 代际 token 防泄漏 | `useVideoDecoder.js`, `HomeView.vue`, `useDevices.js` |
+| Electron-高危 | SIGKILL 兜底改用 exitCode/signalCode 判活（`!proc.killed` 恒假）；补 spawn error 监听防主进程崩溃；重启失败路径不再污染 _stopping（重试 3 次额度恢复）；before-quit 改 preventDefault+stop().finally(app.exit) | `backend-manager.js`, `backend-manager-state.js`, `main.js` |
+| Electron-中低 | 重启互斥 _restarting+代际 token；健康检查 timeout/error 双重调度去重；退出码 0 打日志；dev 模式从 .backend-port 回读实际端口 | `backend-manager.js` |
+| 跳过项 | M-8 旋转后 screen_size 不更新（需解析 SPS/旋转通知，工程量大，待后续专项）；后端 L-2/L-6（低危潜伏） | — |
+
+### 验证结果（已执行）
+
+1. **后端单测**：`uv run python -m unittest discover -s tests` → 29 个测试全部通过（新增 7 个：scroll 编码 ×4、视频帧缓冲 ×3）
+2. **前端单测**：`node --test 'src/**/*.test.js'` → 14/14 通过
+3. **Electron 单测**：`node --test 'electron/*.test.js'` → 6/6 通过（新增 isProcessAlive、restartDecision、parsePortFile 用例）
+4. **前端构建**：`npm run build` → 构建成功
+5. **后端健康检查**：启动后 `curl http://127.0.0.1:18000/health` → `{"status":"ok"}`，优雅关停无报错
+6. **静态检查**：`ruff check` → 0 错误（顺带修复历史遗留 F401）
+
+### 最终提交
+
+- `ef87980` fix(stability): 修复全项目排查发现的高中危缺陷
