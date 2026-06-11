@@ -940,3 +940,9 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - `d423a5c` docs(sync): 同步 Python/Nuitka 版本说明与跨平台产物名表述
+
+### 补充（同日）：README 全面同步
+
+用户指出 README 仍未同步。逐项核实后修正 7 处：前置依赖 Python/Nuitka 说明、backend:verify 描述去 exe 化、项目结构（移除不存在的 requirements.txt，补齐 bin/、scripts/、backend/tests/、frontend views/utils/router、electron 状态模块、memory/）、发布验证清单加入单元测试与 backend:build 步骤、文档引用补齐操作手册与下一步计划链接。
+
+- 提交：`410aaf0` docs(readme): 同步 README 与项目实际状态（已推送）
