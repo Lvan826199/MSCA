@@ -43,7 +43,7 @@ MSCA（Mobile Screen Control Assistant）是一个跨平台的移动设备投屏
 ### 前置依赖
 
 - **Node.js** 18+
-- **Python** 3.13+
+- **Python** 3.13+（3.14 已验证；Nuitka 编译需 `nuitka>=4.1.2`，已在 uv.lock 锁定）
 - **uv** 包管理器
 - **ADB**（Android Platform Tools ≥33.0）
 - **内置 scrcpy-server**（位于 `bin/android/scrcpy-server`，由 Python 后端推送并管理）
@@ -105,7 +105,7 @@ npm run electron:build
 | `npm run dev` | 仅启动前端开发服务器 |
 | `npm run build` | 构建 Vue 前端 |
 | `npm run backend:build` | Nuitka 编译后端为独立可执行文件（Windows 为 .exe，Linux/macOS 无后缀） |
-| `npm run backend:verify` | 验证后端 exe 是否正常运行 |
+| `npm run backend:verify` | 验证后端编译产物是否正常运行（资源检查 + `/health` + `/api/devices`） |
 | `npm run electron:build` | 完整打包（前端 + 后端 + Electron），输出 `dist/electron/MSCA Setup 0.1.0.exe` |
 
 ## 部署模式
@@ -133,11 +133,15 @@ msca/
 ├── electron/                 # Electron 主进程与预加载脚本
 │   ├── main.js              # 主进程入口
 │   ├── preload.js           # 预加载脚本
-│   └── backend-manager.js   # Python 后端进程管理模块
+│   ├── backend-manager.js   # Python 后端进程管理模块
+│   └── backend-manager-state.js  # 进程管理纯逻辑（可单测）
 ├── frontend/                 # Vue 3 前端应用
 │   ├── src/
-│   │   ├── components/      # Vue 组件（设备列表、投屏窗口等）
-│   │   ├── composables/     # 组合式函数（WebSocket、视频解码）
+│   │   ├── components/      # Vue 组件（设备卡片、投屏面板、控制栏）
+│   │   ├── composables/     # 组合式函数（WebSocket、视频解码、设备控制）
+│   │   ├── views/           # 页面（设备管理、投屏、设置）
+│   │   ├── utils/           # 工具函数（连接地址、投屏面板状态）
+│   │   ├── router/          # 路由
 │   │   └── App.vue
 │   └── index.html
 ├── backend/                  # Python FastAPI 后端
@@ -148,14 +152,16 @@ msca/
 │   │   │   ├── android.py   # AndroidDriver
 │   │   │   ├── ios.py       # IOSDriver
 │   │   │   └── adapters/    # iOS 适配器 (tidevice, go-ios)
+│   │   ├── scrcpy/          # scrcpy 协议编解码与 server 管理
 │   │   └── core/            # 设备管理、流分发等核心模块
+│   ├── tests/               # 单元测试（unittest）
 │   ├── pyproject.toml       # uv 项目配置
-│   └── requirements.txt     # 可选依赖锁定文件
+│   └── uv.lock              # 依赖锁定文件
+├── bin/                      # 内置移动端二进制（scrcpy-server、bundletool、go-ios）
+├── scripts/                  # 构建与验证脚本（build-backend、verify-backend 等）
 ├── resources/                # 资源文件（图标、WDA.ipa 等）
-├── doc/                      # 项目文档
-│   ├── 项目需求及技术栈概览.md
-│   ├── 需求拆解.md
-│   └── 开发计划.md
+├── doc/                      # 项目文档（概览、拆解、计划、操作手册、修复日志等）
+├── memory/                   # AI 操作步骤记录
 └── package.json              # Node.js 项目配置
 ```
 
@@ -163,11 +169,16 @@ msca/
 
 发布前建议按顺序执行以下验证：
 
-1. `npm run build`：验证 Vue 前端可正常构建。
-2. `npm run backend:verify`：验证 Nuitka 后端 standalone 产物可启动，并通过 `/health` 与 `/api/devices` 检查。
-3. `npm run electron:build`：生成 Windows 安装包与免安装目录。
-4. 安装 `dist/electron/MSCA Setup 0.1.0.exe` 后启动应用，确认内嵌后端自动拉起、设备列表正常。
-5. 连接 Android 与 iOS 设备，分别验证投屏启动、控制操作、停止投屏与资源释放。
+1. 单元测试全量通过：
+   - 后端：`cd backend && uv run python -m unittest discover -s tests`
+   - 前端：`cd frontend && node --test "src/**/*.test.js"`
+   - Electron：`node --test "electron/*.test.js"`
+2. `npm run build`：验证 Vue 前端可正常构建。
+3. `npm run backend:build`：Nuitka 编译后端 standalone 产物。
+4. `npm run backend:verify`：验证产物可启动，并通过 `/health` 与 `/api/devices` 检查。
+5. `npm run electron:build`：生成 Windows 安装包与免安装目录。
+6. 安装 `dist/electron/MSCA Setup 0.1.0.exe` 后启动应用，确认内嵌后端自动拉起、设备列表正常。
+7. 连接 Android 与 iOS 设备，分别验证投屏启动、控制操作（点击/滑动/滚轮/旋转后反控）、停止投屏与资源释放。
 
 ## iOS WDA 排障速查
 
@@ -189,6 +200,8 @@ msca/
 - [项目需求及技术栈概览](doc/项目需求及技术栈概览.md) — 完整的技术设计方案
 - [需求拆解](doc/需求拆解.md) — 功能模块拆解与优先级
 - [开发计划](doc/开发计划.md) — 分阶段开发里程碑
+- [下一步计划](doc/下一步计划.md) — 当前阶段具体开发任务
+- [操作手册](doc/操作手册.md) — 环境搭建、设备连接、启动与排障流程
 - [修复日志](doc/修复日志.md) — 全项目 bug 排查修复记录
 - [CLAUDE.md](CLAUDE.md) — AI 开发指令与强制验证流程
 - [AI 操作步骤记录](memory/ai_step.md) — 历次开发操作记录与验证结果
