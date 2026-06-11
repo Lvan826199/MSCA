@@ -36,6 +36,10 @@ const buildDir = path.join(backendDir, "build", "nuitka")
 rmSync(buildDir, { recursive: true, force: true })
 mkdirSync(buildDir, { recursive: true })
 
+// 产物文件名按平台区分：Windows 为 msca-backend.exe，Linux/macOS 为 msca-backend
+// （verify-backend.mjs 与 electron/backend-manager.js 按相同规则查找）
+const exeName = process.platform === "win32" ? "msca-backend.exe" : "msca-backend"
+
 await run(
   "uv",
   [
@@ -46,7 +50,7 @@ await run(
     "--standalone",
     "--assume-yes-for-downloads",
     "--output-dir=build/nuitka",
-    "--output-filename=msca-backend.exe",
+    `--output-filename=${exeName}`,
     "--include-package=app",
     "--include-package=uvicorn",
     "--include-package=fastapi",
