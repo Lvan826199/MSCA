@@ -845,3 +845,40 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - `ef87980` fix(stability): 修复全项目排查发现的高中危缺陷
+
+---
+
+## 2026-06-11 — 遗留缺陷清零（第二轮，4 项）
+
+### 触发背景
+
+用户要求修复第一轮（2026-06-10，提交 ef87980）排查中遗留的 4 项缺陷，并在 doc/ 下建立修复日志、同步相关文档。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 旋转反控失效（高） | protocol.py 新增 SPS 宽高解析（_BitReader Exp-Golomb + 防竞争字节剥离 + 裁剪计算）；server_manager 识别 pts bit63 的 PACKET_FLAG_CONFIG，仅对配置包解析 SPS 刷新 screen_size，普通帧零开销 | `backend/app/scrcpy/protocol.py`, `server_manager.py` |
+| 端口 TOCTOU（中） | 探测改绑 args.host；uvicorn SystemExit(3) 时清理端口文件换下一端口重试（最多 10 个） | `backend/__main__.py` |
+| NAL 起始码回退（低潜伏） | 扫描统一按 00 00 01 匹配并记录实际前缀位置，边界按实际前缀长度回退 | `backend/app/scrcpy/protocol.py` |
+| Electron 打包端口回读（中） | 两种模式统一 --port-file 显式传路径（打包模式 userData 目录），_refreshPortFromFile 去掉打包守卫，spawn 前统一清理残留端口文件 | `electron/backend-manager.js` |
+| 新增测试 | test_h264_sps.py（9 用例，含规范级 SPS 位流写入器交叉验证）、test_backend_entry.py（3 用例）、旋转场景 2 用例 | `backend/tests/` |
+| 修复日志 | 新建 doc/修复日志.md，完整记录两轮排查修复（根因/修复/验证） | `doc/修复日志.md` |
+| 文档同步 | CLAUDE.md 文档索引与 README 文档章节加入修复日志链接 | `CLAUDE.md`, `README.md` |
+
+### 验证结果（已执行）
+
+1. **后端单测**：43 个全部通过（新增 14 个）
+2. **Electron 单测**：6/6 通过；`node --check` 语法通过
+3. **前端构建**：`npm run build` 成功
+4. **后端健康检查**：`curl /health` → `{"status":"ok"}`；SIGTERM 退出后端口文件正确清理
+5. **端口占用实测**：占用 18000 后启动，后端自动改用 18001 且健康检查通过
+6. **静态检查**：`ruff check` 0 错误
+
+### 待办
+
+- Electron 打包模式端口回读的端到端确认，需在下次 `npm run backend:build` + `backend:verify` 发布验证时覆盖
+
+### 最终提交
+
+- `dd651a4` fix(stability): 清零第一轮排查遗留的 4 项缺陷
