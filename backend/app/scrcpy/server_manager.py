@@ -94,6 +94,8 @@ class ScrcpyServerManager:
         self._video_recv_buffer = b""
         # 当前待读取的 H.264 包大小（meta 已读完但包体未读完时记录）
         self._pending_packet_size: int | None = None
+        # 当前待读取的包是否为配置包（含 SPS/PPS，pts 字段 bit63 标记）
+        self._pending_is_config = False
         # control socket 发送/读取互斥锁，避免临时阻塞发送与非阻塞 recv 竞态
         self._control_lock = asyncio.Lock()
 
@@ -303,17 +305,24 @@ class ScrcpyServerManager:
                 meta = await asyncio.get_event_loop().run_in_executor(
                     None, self._recv_exact_buffered, self._video_socket, 12
                 )
+                pts = struct.unpack(">Q", meta[0:8])[0]
                 packet_size = struct.unpack(">I", meta[8:12])[0]
 
                 if packet_size == 0:
                     return None
                 self._pending_packet_size = packet_size
+                # pts bit63 为 PACKET_FLAG_CONFIG：配置包（SPS/PPS），
+                # 设备旋转/分辨率变化时 server 会重新发送
+                self._pending_is_config = bool(pts >> 63 & 1)
 
             # 读取 H.264 数据包（可能从上次的断点继续）
             data = await asyncio.get_event_loop().run_in_executor(
                 None, self._recv_exact_buffered, self._video_socket, self._pending_packet_size
             )
             self._pending_packet_size = None
+            if self._pending_is_config:
+                self._pending_is_config = False
+                self._update_screen_size_from_sps(data)
             return data
         except TimeoutError:
             # socket 超时，无新帧可读（残余字节已保留在缓冲区）
@@ -326,6 +335,20 @@ class ScrcpyServerManager:
         except Exception as e:
             logger.error(f"[{self.device_serial}] 读取视频帧失败: {e}")
             return None
+
+    def _update_screen_size_from_sps(self, data: bytes) -> None:
+        """从配置包中的 SPS 解析新分辨率并刷新 screen_size。
+
+        scrcpy server 校验触控消息携带的宽高与设备当前显示尺寸一致，
+        不一致会丢弃事件；设备旋转后必须同步更新，否则反控失效。
+        """
+        dims = protocol.extract_sps_dimensions(data)
+        if dims and dims != (self._screen_width, self._screen_height):
+            logger.info(
+                f"[{self.device_serial}] 屏幕尺寸变化（旋转/分辨率切换）: "
+                f"{self._screen_width}x{self._screen_height} → {dims[0]}x{dims[1]}"
+            )
+            self._screen_width, self._screen_height = dims
 
     async def send_control(self, data: bytes) -> None:
         """向 control socket 发送控制指令（加锁串行化，避免与 recv 竞态）。"""
@@ -403,6 +426,7 @@ class ScrcpyServerManager:
         self._device_message_buffer = b""
         self._video_recv_buffer = b""
         self._pending_packet_size = None
+        self._pending_is_config = False
 
         if self._server_stream:
             try:

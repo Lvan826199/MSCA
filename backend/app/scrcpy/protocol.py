@@ -78,43 +78,202 @@ def parse_nal_units(data: bytes) -> list[tuple[int, bytes]]:
         [(nal_type, nal_data), ...] 列表
     """
     units = []
-    # 查找 start code（0x00000001 或 0x000001）
+    # 查找 start code，记录 (payload 起始位置, start code 前缀起始位置)
+    # 统一按 0x000001 扫描：若前一字节为 0x00 则实际是 4 字节 start code
     i = 0
-    starts = []
-    while i < len(data) - 3:
-        if data[i : i + 4] == b"\x00\x00\x00\x01":
-            starts.append(i + 4)
-            i += 4
-        elif data[i : i + 3] == b"\x00\x00\x01":
-            starts.append(i + 3)
+    marks: list[tuple[int, int]] = []
+    while i + 3 <= len(data):
+        if data[i : i + 3] == b"\x00\x00\x01":
+            prefix_start = i - 1 if i >= 1 and data[i - 1] == 0 else i
+            marks.append((i + 3, prefix_start))
             i += 3
         else:
             i += 1
 
-    if not starts:
+    if not marks:
         # 没有 start code，整个数据作为一个 NAL
         if len(data) > 0:
             nal_type = data[0] & NAL_TYPE_MASK
             units.append((nal_type, data))
         return units
 
-    for idx, start in enumerate(starts):
-        end = starts[idx + 1] - 4 if idx + 1 < len(starts) else len(data)
-        # 回退 start code 长度
-        if idx + 1 < len(starts):
-            # 检查下一个 start code 是 3 字节还是 4 字节
-            sc_pos = starts[idx + 1]
-            if sc_pos >= 4 and data[sc_pos - 4 : sc_pos - 4 + 4] == b"\x00\x00\x00\x01":
-                end = sc_pos - 4
-            else:
-                end = sc_pos - 3
-
-        nal_data = data[start:end]
+    for idx, (payload_start, prefix_start) in enumerate(marks):
+        # 当前单元结束于下一个 start code 的前缀起始处（按实际前缀长度回退）
+        end = marks[idx + 1][1] if idx + 1 < len(marks) else len(data)
+        nal_data = data[payload_start:end]
         if len(nal_data) > 0:
             nal_type = nal_data[0] & NAL_TYPE_MASK
-            units.append((nal_type, data[start - 4 : end] if start >= 4 else data[start - 3 : end]))
+            units.append((nal_type, data[prefix_start:end]))
 
     return units
+
+
+# ─── SPS 宽高解析（设备旋转/分辨率变化时更新 screen_size 用） ───
+
+# H.264 规范中携带 chroma_format_idc 等扩展字段的 profile_idc 集合
+_HIGH_PROFILE_IDCS = frozenset({100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135})
+
+
+class _BitReader:
+    """大端序按位读取器，用于解析 Exp-Golomb 编码的 SPS 字段。"""
+
+    def __init__(self, data: bytes):
+        self._data = data
+        self._bit_pos = 0
+
+    def read_bit(self) -> int:
+        byte_idx, bit_idx = divmod(self._bit_pos, 8)
+        if byte_idx >= len(self._data):
+            raise ValueError("SPS 比特流越界")
+        self._bit_pos += 1
+        return (self._data[byte_idx] >> (7 - bit_idx)) & 1
+
+    def read_bits(self, n: int) -> int:
+        value = 0
+        for _ in range(n):
+            value = (value << 1) | self.read_bit()
+        return value
+
+    def read_ue(self) -> int:
+        """读取无符号 Exp-Golomb 编码值。"""
+        zeros = 0
+        while self.read_bit() == 0:
+            zeros += 1
+            if zeros > 31:
+                raise ValueError("非法的 Exp-Golomb 编码")
+        if zeros == 0:
+            return 0
+        return (1 << zeros) - 1 + self.read_bits(zeros)
+
+    def read_se(self) -> int:
+        """读取有符号 Exp-Golomb 编码值。"""
+        ue = self.read_ue()
+        return (ue + 1) // 2 if ue % 2 else -(ue // 2)
+
+
+def _strip_emulation_prevention(data: bytes) -> bytes:
+    """剥离 NAL 中的防竞争字节（00 00 03 → 00 00），得到 RBSP。"""
+    out = bytearray()
+    i = 0
+    while i < len(data):
+        if i + 2 < len(data) and data[i] == 0 and data[i + 1] == 0 and data[i + 2] == 3:
+            out += data[i : i + 2]
+            i += 3
+        else:
+            out.append(data[i])
+            i += 1
+    return bytes(out)
+
+
+def _skip_scaling_list(reader: _BitReader, size: int) -> None:
+    """跳过 SPS 中的 scaling list（仅消费比特，不使用内容）。"""
+    last_scale, next_scale = 8, 8
+    for _ in range(size):
+        if next_scale != 0:
+            next_scale = (last_scale + reader.read_se() + 256) % 256
+        last_scale = next_scale if next_scale != 0 else last_scale
+
+
+def _strip_start_code(nal: bytes) -> bytes:
+    """剥离 NAL 前缀的 start code（如有）。"""
+    if nal.startswith(b"\x00\x00\x00\x01"):
+        return nal[4:]
+    if nal.startswith(b"\x00\x00\x01"):
+        return nal[3:]
+    return nal
+
+
+def parse_sps_dimensions(nal: bytes) -> tuple[int, int] | None:
+    """从 SPS NAL 单元解析视频宽高。
+
+    Args:
+        nal: 不含 start code 的 SPS NAL（首字节为 NAL header）
+
+    Returns:
+        (width, height)，解析失败返回 None
+    """
+    try:
+        reader = _BitReader(_strip_emulation_prevention(nal[1:]))
+        profile_idc = reader.read_bits(8)
+        reader.read_bits(8)  # constraint flags + reserved
+        reader.read_bits(8)  # level_idc
+        reader.read_ue()  # seq_parameter_set_id
+
+        chroma_format_idc = 1
+        if profile_idc in _HIGH_PROFILE_IDCS:
+            chroma_format_idc = reader.read_ue()
+            if chroma_format_idc == 3:
+                reader.read_bit()  # separate_colour_plane_flag
+            reader.read_ue()  # bit_depth_luma_minus8
+            reader.read_ue()  # bit_depth_chroma_minus8
+            reader.read_bit()  # qpprime_y_zero_transform_bypass_flag
+            if reader.read_bit():  # seq_scaling_matrix_present_flag
+                count = 8 if chroma_format_idc != 3 else 12
+                for i in range(count):
+                    if reader.read_bit():
+                        _skip_scaling_list(reader, 16 if i < 6 else 64)
+
+        reader.read_ue()  # log2_max_frame_num_minus4
+        poc_type = reader.read_ue()
+        if poc_type == 0:
+            reader.read_ue()  # log2_max_pic_order_cnt_lsb_minus4
+        elif poc_type == 1:
+            reader.read_bit()  # delta_pic_order_always_zero_flag
+            reader.read_se()  # offset_for_non_ref_pic
+            reader.read_se()  # offset_for_top_to_bottom_field
+            for _ in range(reader.read_ue()):
+                reader.read_se()
+
+        reader.read_ue()  # max_num_ref_frames
+        reader.read_bit()  # gaps_in_frame_num_value_allowed_flag
+        pic_width_in_mbs = reader.read_ue() + 1
+        pic_height_in_map_units = reader.read_ue() + 1
+        frame_mbs_only = reader.read_bit()
+        if not frame_mbs_only:
+            reader.read_bit()  # mb_adaptive_frame_field_flag
+        reader.read_bit()  # direct_8x8_inference_flag
+
+        crop_left = crop_right = crop_top = crop_bottom = 0
+        if reader.read_bit():  # frame_cropping_flag
+            crop_left = reader.read_ue()
+            crop_right = reader.read_ue()
+            crop_top = reader.read_ue()
+            crop_bottom = reader.read_ue()
+
+        width = pic_width_in_mbs * 16
+        height = pic_height_in_map_units * 16 * (2 - frame_mbs_only)
+
+        # 裁剪单位由色度采样格式决定（H.264 规范 7.4.2.1.1）
+        if chroma_format_idc == 0:
+            crop_unit_x, crop_unit_y = 1, 2 - frame_mbs_only
+        else:
+            sub_width_c = 2 if chroma_format_idc in (1, 2) else 1
+            sub_height_c = 2 if chroma_format_idc == 1 else 1
+            crop_unit_x = sub_width_c
+            crop_unit_y = sub_height_c * (2 - frame_mbs_only)
+
+        width -= (crop_left + crop_right) * crop_unit_x
+        height -= (crop_top + crop_bottom) * crop_unit_y
+        if width <= 0 or height <= 0:
+            return None
+        return width, height
+    except (ValueError, IndexError):
+        return None
+
+
+def extract_sps_dimensions(data: bytes) -> tuple[int, int] | None:
+    """在 H.264 数据包中查找 SPS 并解析宽高。
+
+    Args:
+        data: 原始 H.264 数据包（可能含多个 NAL 单元）
+
+    Returns:
+        (width, height)，无 SPS 或解析失败返回 None
+    """
+    for nal_type, nal in parse_nal_units(data):
+        if nal_type == NAL_SPS:
+            return parse_sps_dimensions(_strip_start_code(nal))
+    return None
 
 
 def is_key_frame(data: bytes) -> bool:

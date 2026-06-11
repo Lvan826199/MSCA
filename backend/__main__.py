@@ -20,16 +20,26 @@ DEFAULT_PORT = 18000
 MAX_PORT_ATTEMPTS = 10
 
 
-def find_available_port(start: int, attempts: int = MAX_PORT_ATTEMPTS) -> int:
+def port_available(host: str, port: int) -> bool:
+    """探测端口在指定监听地址上是否可绑定。
+
+    探测地址必须与实际监听地址一致，否则 --host 0.0.0.0 时
+    探测结论不代表 uvicorn 实际可绑定。
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind((host, port))
+            return True
+        except OSError:
+            return False
+
+
+def find_available_port(start: int, attempts: int = MAX_PORT_ATTEMPTS, host: str = "127.0.0.1") -> int:
     """从 start 开始逐个尝试，返回第一个可用端口。"""
     for offset in range(attempts):
         port = start + offset
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("127.0.0.1", port))
-                return port
-            except OSError:
-                continue
+        if port_available(host, port):
+            return port
     raise RuntimeError(f"端口 {start}-{start + attempts - 1} 均被占用")
 
 
@@ -55,15 +65,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    port = find_available_port(args.port)
-
     # 端口文件路径：默认项目根目录
     if args.port_file:
         port_file = Path(args.port_file)
     else:
         port_file = Path(__file__).resolve().parent.parent / ".backend-port"
 
-    write_port_file(port_file, port)
     atexit.register(remove_port_file, port_file)
 
     # Windows 上 SIGTERM 不一定可用，用 try 包裹
@@ -82,8 +89,29 @@ def main() -> None:
         except (OSError, ValueError):
             pass
 
-    print(f"[backend] 启动于端口 {port}，端口文件: {port_file}")
-    uvicorn.run("app.main:app", host=args.host, port=port)
+    # uvicorn 启动失败退出码（uvicorn.main.STARTUP_FAILURE）
+    startup_failure_code = 3
+
+    # 探测可用后逐个端口尝试启动：探测与 uvicorn 实际 bind 之间存在 TOCTOU 窗口，
+    # 端口在间隙中被抢占时 uvicorn 以 SystemExit(3) 失败，清理端口文件换下一个端口重试
+    for offset in range(MAX_PORT_ATTEMPTS):
+        port = args.port + offset
+        if not port_available(args.host, port):
+            continue
+
+        write_port_file(port_file, port)
+        print(f"[backend] 启动于端口 {port}，端口文件: {port_file}")
+        try:
+            uvicorn.run("app.main:app", host=args.host, port=port)
+            return
+        except SystemExit as exc:
+            if exc.code == startup_failure_code:
+                print(f"[backend] 端口 {port} 启动失败（可能被抢占），尝试下一个端口")
+                remove_port_file(port_file)
+                continue
+            raise
+
+    raise RuntimeError(f"端口 {args.port}-{args.port + MAX_PORT_ATTEMPTS - 1} 均无法启动")
 
 
 if __name__ == "__main__":

@@ -123,21 +123,28 @@ class BackendManager {
   async _spawn() {
     const isDev = !this._isPackaged
     const cmd = this._getBackendPath()
+    const portFile = this._portFilePath()
+    // 清理残留端口文件，避免健康检查回读到上次运行的旧端口
+    try {
+      fs.unlinkSync(portFile)
+    } catch {
+      // 文件不存在时忽略
+    }
     let args, opts
     if (isDev) {
       // dev 模式走 __main__.py，统一处理端口文件写入
-      args = ["run", "python", "__main__.py", "--host", "127.0.0.1", "--port", String(this._port)]
+      args = [
+        "run", "python", "__main__.py",
+        "--host", "127.0.0.1",
+        "--port", String(this._port),
+        "--port-file", portFile,
+      ]
       opts = { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, cwd: path.join(__dirname, "..", "backend") }
-      // 清理残留端口文件，避免健康检查回读到上次运行的旧端口
-      try {
-        fs.unlinkSync(this._portFilePath())
-      } catch {
-        // 文件不存在时忽略
-      }
     } else {
       const resPath = process.resourcesPath || path.join(__dirname, "..")
       const backendRuntimeDir = path.join(resPath, "resources", "msca-backend")
-      args = ["--port", String(this._port)]
+      // 打包模式显式指定端口文件路径（Nuitka 产物的默认落点不可靠）
+      args = ["--port", String(this._port), "--port-file", portFile]
       opts = {
         cwd: backendRuntimeDir,
         stdio: ["ignore", "pipe", "pipe"],
@@ -183,14 +190,19 @@ class BackendManager {
   }
 
   _portFilePath() {
-    // 与 backend/__main__.py 默认写入路径一致：项目根目录/.backend-port
+    if (this._isPackaged) {
+      // 打包模式：resources 目录可能只读（如安装到 Program Files），
+      // 端口文件统一写到 userData 目录，通过 --port-file 显式传给后端
+      const { app } = require("electron")
+      return path.join(app.getPath("userData"), ".backend-port")
+    }
+    // dev 模式与 backend/__main__.py 默认写入路径一致：项目根目录/.backend-port
     return path.join(__dirname, "..", ".backend-port")
   }
 
-  // dev 模式下 --port 仅为“起始端口”，后端可能实际选用其他端口并写入 .backend-port，
+  // --port 仅为“起始端口”，后端可能实际选用其他端口并写入端口文件，
   // 健康检查前回读实际端口，消除 Electron 探测与后端绑定之间的竞态
   _refreshPortFromFile() {
-    if (this._isPackaged) return
     try {
       const port = parsePortFile(fs.readFileSync(this._portFilePath(), "utf-8"))
       if (port !== null) this._port = port
