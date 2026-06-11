@@ -946,3 +946,30 @@ git commit -m "type(scope): subject"
 用户指出 README 仍未同步。逐项核实后修正 7 处：前置依赖 Python/Nuitka 说明、backend:verify 描述去 exe 化、项目结构（移除不存在的 requirements.txt，补齐 bin/、scripts/、backend/tests/、frontend views/utils/router、electron 状态模块、memory/）、发布验证清单加入单元测试与 backend:build 步骤、文档引用补齐操作手册与下一步计划链接。
 
 - 提交：`410aaf0` docs(readme): 同步 README 与项目实际状态（已推送）
+
+---
+
+## 2026-06-11 — 引入 planning-with-files Skill
+
+### 触发背景
+
+用户要求查找 planning-with-files Skill，全局安装并引入本项目。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 来源确认 | GitHub OthmanAdi/planning-with-files（Manus 风格文件化规划，SKILL.md 标准，v3.0.0） | — |
+| 安全审查 | 逐项检查 19 个脚本：无网络调用、无危险命令，仅本地计划文件操作 | — |
+| 全局安装 | 克隆后将 skills/planning-with-files 复制到 ~/.claude/skills/（SKILL.md + examples + reference + scripts + templates） | 全局目录（不入库） |
+| 项目引入 | CLAUDE.md 新增"任务规划规范"章节（三文件工作法、使用时机、工作文件不提交） | `CLAUDE.md` |
+| 忽略规则 | task_plan.md / findings.md / progress.md / .planning/ 加入 .gitignore | `.gitignore` |
+
+### 验证结果
+
+- ~/.claude/skills/planning-with-files/SKILL.md 就位，frontmatter（name/description/hooks）完整
+- 注意：Skill 在会话启动时加载，本会话不可见，重启 Claude Code 后生效
+
+### 最终提交
+
+- 见本次 docs 提交 hash（CLAUDE.md + .gitignore + 本记录）

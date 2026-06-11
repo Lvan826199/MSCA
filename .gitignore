@@ -69,3 +69,9 @@ backend/__main__.dist/
 backend/nuitka-crash-report.xml
 resources/msca-backend.exe
 resources/msca-backend/
+
+# planning-with-files Skill 的会话规划工作文件
+task_plan.md
+findings.md
+progress.md
+.planning/

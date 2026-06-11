@@ -150,6 +150,15 @@ uv add <package>
 uv add --dev <package>
 ```
 
+## 任务规划规范
+
+复杂多步任务（预计 5 次以上工具调用、跨阶段开发、研究排查类工作）须使用 **planning-with-files** Skill（已全局安装于 `~/.claude/skills/planning-with-files/`）进行文件化规划：
+
+- **三文件工作法**：`task_plan.md`（阶段与进度）、`findings.md`（调研与发现）、`progress.md`（会话日志与测试结果）
+- **核心价值**：计划持久化到磁盘，崩溃/清空上下文（`/clear`）后可自动恢复；自带 hooks 在关键节点注入计划上下文并校验完成度
+- **使用方式**：开始复杂任务时调用该 Skill 创建计划文件；每完成一个阶段同步更新状态
+- **注意**：规划工作文件（`task_plan.md`、`findings.md`、`progress.md`、`.planning/`）为会话工作内存，已加入 `.gitignore`，不要提交
+
 ## UI 设计规范
 
 本项目 UI 设计遵循 **ui-ux-pro-max** Skill 所定义的现代桌面应用设计语言，确保界面专业、一致且易用。
