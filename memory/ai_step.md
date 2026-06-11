@@ -882,3 +882,35 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - `dd651a4` fix(stability): 清零第一轮排查遗留的 4 项缺陷
+
+---
+
+## 2026-06-11 — 打包链路验证与构建修复（第三轮，遗留待办清零）
+
+### 触发背景
+
+用户要求在当前 Linux 环境完成第二轮唯一待办：Electron 打包模式端口回读的端到端确认。过程中发现并修复构建链路 2 个阻塞问题。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 构建阻塞 1 | Nuitka 4.0.8 与 Python 3.14 GC 结构不兼容编译必败；依赖约束升至 nuitka>=4.1.2 并用官方 PyPI 源重锁（注意：本机 uv 镜像会把 lock 重写为阿里云 URL，重锁需 UV_DEFAULT_INDEX 显式指定官方源） | `backend/pyproject.toml`, `backend/uv.lock` |
+| 构建阻塞 2 | build-backend.mjs 硬编码 --output-filename=msca-backend.exe，Linux 产物名与脚本查找/verify/backend-manager 的平台规则错配；改为按平台区分 | `scripts/build-backend.mjs` |
+| 环境准备 | patchelf（Linux standalone 必需）经 PyPI 包装入 venv，免 sudo | venv（不入库） |
+| E2E 验证 | 真实 BackendManager(isPackaged=true)（stub electron 提供 userData）+ 真实 Nuitka 产物；占用 18000 复现 TOCTOU | /tmp 测试脚本（不入库） |
+| 修复日志 | 追加第三轮记录（根因/验证/环境限制说明） | `doc/修复日志.md` |
+
+### 验证结果（已执行）
+
+1. **backend:build**：Nuitka 4.1.2 + Python 3.14 全流程成功（修正后脚本端到端跑通，产物约 125MB）
+2. **backend:verify**：资源检查 4/5（bin/ios/ios 为 Linux 版 go-ios，仓库仅含 Windows 版 ios.exe，环境限制）；功能项手动执行通过：产物启动 → /health 200 → /api/devices 200 → SIGTERM 优雅退出（退出码 0）
+3. **端口回读 E2E**：探测 18000 被抢占 → 后端自动改用 18001 → 端口文件写入 userData → BackendManager 回读 18001 → 健康检查通过 → 退出后端口文件清理 ✅（用构建脚本最终产物复跑一次，同样通过）
+
+### 环境限制
+
+- 本轮产物为 Linux 二进制，验证覆盖端口回读完整逻辑链路；Windows 发布产物仍需在 Windows 机器最终跑一次 backend:build + backend:verify
+
+### 最终提交
+
+- `19dfb4b` fix(build): 修复 Linux 产物名错配并升级 Nuitka 兼容 Python 3.14
