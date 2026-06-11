@@ -914,3 +914,29 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - `19dfb4b` fix(build): 修复 Linux 产物名错配并升级 Nuitka 兼容 Python 3.14
+
+---
+
+## 2026-06-11 — 文档同步补充（Python/Nuitka 版本与跨平台表述）
+
+### 触发背景
+
+用户指出：项目 Python 版本为 3.13，第三轮构建修复（Nuitka 升级涉及 3.14）后相关文档（操作手册等）与引用未同步。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 版本说明 | 明确"最低 3.13（3.14 已验证）"，pyproject requires-python 未变；CLAUDE.md 前置依赖与操作手册环境表格补注 | `CLAUDE.md`, `doc/操作手册.md` |
+| 编译注意事项 | 操作手册 §5.2 新增：nuitka>=4.1.2 约束原因、平台产物名规则、Linux patchelf 安装方式 | `doc/操作手册.md` |
+| 产物名表述 | "编译为 exe"等 Windows 专属表述改为按平台区分（win 为 .exe，Linux/macOS 无后缀） | `README.md`, `CLAUDE.md`, `doc/需求拆解.md`, `doc/操作手册.md` |
+| 引用修正 | 操作手册头部"相关文档"加入修复日志链接；下一步计划中 build-backend.sh → build-backend.mjs | `doc/操作手册.md`, `doc/下一步计划.md` |
+| 修复日志澄清 | 第三轮根因补充"项目最低版本 3.13 未变，3.14 为本机 venv 实际版本，升级对 3.13 用户无影响" | `doc/修复日志.md` |
+
+### 验证结果
+
+纯文档变更，已复查全部文档中 Python/Nuitka/产物名表述一致性（grep 全仓核对），无代码改动。
+
+### 最终提交
+
+- `d423a5c` docs(sync): 同步 Python/Nuitka 版本说明与跨平台产物名表述

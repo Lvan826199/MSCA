@@ -104,7 +104,7 @@ npm run electron:build
 | `npm run electron:dev` | 一键启动桌面端开发模式（推荐） |
 | `npm run dev` | 仅启动前端开发服务器 |
 | `npm run build` | 构建 Vue 前端 |
-| `npm run backend:build` | Nuitka 编译后端为 exe |
+| `npm run backend:build` | Nuitka 编译后端为独立可执行文件（Windows 为 .exe，Linux/macOS 无后缀） |
 | `npm run backend:verify` | 验证后端 exe 是否正常运行 |
 | `npm run electron:build` | 完整打包（前端 + 后端 + Electron），输出 `dist/electron/MSCA Setup 0.1.0.exe` |
 
