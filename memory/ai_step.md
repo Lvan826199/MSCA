@@ -949,6 +949,45 @@ git commit -m "type(scope): subject"
 
 ---
 
+## 2026-06-12 — 桌面版打包与图标生成
+
+### 触发背景
+
+用户要求打包桌面版并启动应用。发现两个阻塞问题：①`resources/icon.ico` 不存在（electron-builder 必须）；②`resources/msca-backend/` 目录结构不存在（只有裸可执行文件，BackendManager 生产路径是 `resources/msca-backend/msca-backend.exe`）。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 图标生成 | 将用户提供的 `mwj-logo.svg`（根目录）用 Pillow 渲染为 ICO（16/32/48/256px 多帧，256 帧以 PNG 压缩格式内嵌，满足 electron-builder ≥256px 要求）存入 `resources/icon.ico`；SVG 原件复制存档到 `resources/icon.svg` | `resources/icon.ico`, `resources/icon.svg` |
+| 前端构建 | `npm run build` → 1034 modules 构建成功，生成 `frontend/dist/` | — |
+| 后端 Nuitka 编译 | `npm run backend:build`（约 10 分钟）→ Nuitka 4.1.2 全流程成功，生成 `dist/backend/msca-backend/msca-backend.exe` 与 `resources/msca-backend/msca-backend.exe`（standalone 目录完整复制到两处） | `dist/backend/msca-backend/`, `resources/msca-backend/` |
+| Electron 打包 | `npx electron-builder`（带国内镜像环境变量）→ 打包成功，`dist/electron/MSCA Setup 0.1.0.exe` 与 `dist/electron/win-unpacked/MSCA.exe` 均已生成 | `dist/electron/` |
+| 启动验证 | `start dist/electron/win-unpacked/MSCA.exe` → 应用启动 | — |
+
+### 关键规则（本次确立，后续打包必须遵守）
+
+1. **图标**：`resources/icon.ico` 必须存在，ICO 文件须包含 256×256 帧（PNG 压缩），否则 electron-builder 报"must be at least 256x256"。原始 SVG 存档于 `resources/icon.svg`，使用 Pillow 手动构建 ICO 二进制（`struct.pack` 写入 ICO header + ICONDIRENTRY + PNG 帧数据）可确保 256 帧正确。
+2. **后端产物目录**：`npm run backend:build` 会将 Nuitka standalone 目录同时复制到 `dist/backend/msca-backend/` 和 `resources/msca-backend/`；`electron:build` 的 `extraResources` 会将 `resources/` 整体打入安装包，BackendManager 生产路径为 `process.resourcesPath/resources/msca-backend/msca-backend.exe`。
+3. **打包命令**：不要直接用 `npm run electron:build`（该命令会重跑 `npm run build` + `npm run backend:build`，全量耗时约 15 分钟）。若前端与后端已是最新编译产物，可直接运行 `cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npx electron-builder` 单独打包，节省时间。
+4. **镜像加速**：electron-builder 下载 NSIS/winCodeSign 二进制时必须带 `ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/`，否则从 GitHub 下载超时。electron 本体下载由 `.npmrc` + `package.json electronDownload.mirror` 配置好了国内镜像，无需额外处理。
+5. **非管理员环境**：`package.json` 中 `win.signAndEditExecutable=false` 避免 electron-builder 解压 winCodeSign 时符号链接权限失败，不得删除。
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `npm run build`（前端） | ✅ 1034 modules，构建成功 |
+| `npm run backend:build`（Nuitka） | ✅ standalone 产物生成 |
+| electron-builder 打包 | ✅ `MSCA Setup 0.1.0.exe` 与 `win-unpacked/MSCA.exe` 生成 |
+| 应用启动 | ✅ `win-unpacked/MSCA.exe` 已启动 |
+
+### 最终提交 hash
+
+- 待本次同步提交后记录
+
+---
+
 ## 2026-06-11 — 引入 planning-with-files Skill
 
 ### 触发背景

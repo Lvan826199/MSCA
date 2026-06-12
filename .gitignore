@@ -70,6 +70,9 @@ backend/nuitka-crash-report.xml
 resources/msca-backend.exe
 resources/msca-backend/
 
+# 根目录原始 logo（已整理到 resources/icon.svg）
+mwj-logo.svg
+
 # planning-with-files Skill 的会话规划工作文件
 task_plan.md
 findings.md
