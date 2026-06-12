@@ -39,4 +39,19 @@ function backendStatus({ port, running }) {
   return { port, running }
 }
 
-module.exports = { isProcessAlive, shouldRestartBackend, restartDecision, parsePortFile, backendStatus }
+/**
+ * 生成清理本应用目录下 ios.exe 残留进程的 PowerShell 脚本。
+ * ios.exe 名称过于通用，必须按可执行文件路径前缀过滤，避免误杀无关进程。
+ */
+function buildIosCleanupScript(iosDir) {
+  // PowerShell 单引号字符串中仅需把单引号翻倍转义
+  const escaped = String(iosDir).replace(/'/g, "''")
+  return (
+    `$p='${escaped}'; ` +
+    "Get-CimInstance Win32_Process -Filter \"Name='ios.exe'\" | " +
+    "Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($p, 'OrdinalIgnoreCase') } | " +
+    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+  )
+}
+
+module.exports = { isProcessAlive, shouldRestartBackend, restartDecision, parsePortFile, backendStatus, buildIosCleanupScript }

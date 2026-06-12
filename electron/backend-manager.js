@@ -3,7 +3,7 @@ const path = require("path")
 const fs = require("fs")
 const http = require("http")
 const net = require("net")
-const { backendStatus, restartDecision, isProcessAlive, parsePortFile } = require("./backend-manager-state")
+const { backendStatus, restartDecision, isProcessAlive, parsePortFile, buildIosCleanupScript } = require("./backend-manager-state")
 
 const DEFAULT_PORT = 18000
 const MAX_PORT_ATTEMPTS = 3
@@ -39,6 +39,7 @@ class BackendManager {
 
   async start() {
     this._stopping = false
+    await this._cleanupResidualProcesses()
     this._port = await this._findAvailablePort()
     await this._spawn()
     try {
@@ -53,6 +54,35 @@ class BackendManager {
   async stop() {
     this._stopping = true
     await this._killProcess()
+  }
+
+  // 启动前清理上次异常退出的残留进程（msca-backend.exe 与本应用目录下的 ios.exe），
+  // 避免端口被占用、打包目录文件被锁。仅 Windows 需要（强杀不传递到子进程树的平台）。
+  async _cleanupResidualProcesses() {
+    if (process.platform !== "win32") return
+    const run = (cmd, args) =>
+      new Promise((resolve) => {
+        execFile(cmd, args, { windowsHide: true }, () => resolve())
+      })
+
+    // 单实例锁已保证没有其他存活的 MSCA（同构建）实例，残留后端可按映像名清理；
+    // dev 模式后端经 uv/python 启动且可能与安装版共存，不按映像名清理
+    if (this._isPackaged) {
+      await run("taskkill", ["/F", "/T", "/IM", "msca-backend.exe"])
+    }
+
+    // ios.exe 名称通用，仅清理本应用 bin/ios 目录下启动的进程
+    const base = this._isPackaged
+      ? process.resourcesPath || path.join(__dirname, "..")
+      : path.join(__dirname, "..")
+    const iosDir = path.join(base, "bin", "ios")
+    await run("powershell", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      buildIosCleanupScript(iosDir),
+    ])
+    console.log("[backend] 残留进程清理完成")
   }
 
   // 仅终止后端进程，不改变 _stopping 状态（供崩溃重启失败路径复用，避免污染重试判断）

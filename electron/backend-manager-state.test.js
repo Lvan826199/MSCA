@@ -7,6 +7,7 @@ const {
   restartDecision,
   parsePortFile,
   backendStatus,
+  buildIosCleanupScript,
 } = require("./backend-manager-state.js")
 
 test("shouldRestartBackend stops restarting after max attempts or explicit stop", () => {
@@ -65,4 +66,15 @@ test("parsePortFile 解析合法端口并拒绝非法内容", () => {
   assert.equal(parsePortFile("0"), null)
   assert.equal(parsePortFile("-1"), null)
   assert.equal(parsePortFile("70000"), null)
+})
+
+test("buildIosCleanupScript 按路径前缀过滤并转义单引号", () => {
+  const script = buildIosCleanupScript("C:\\Program Files\\MSCA\\resources\\bin\\ios")
+  assert.ok(script.includes("$p='C:\\Program Files\\MSCA\\resources\\bin\\ios'"))
+  assert.ok(script.includes("Name='ios.exe'"))
+  assert.ok(script.includes("StartsWith($p, 'OrdinalIgnoreCase')"))
+  assert.ok(script.includes("Stop-Process"))
+
+  const quoted = buildIosCleanupScript("C:\\it's\\bin\\ios")
+  assert.ok(quoted.includes("$p='C:\\it''s\\bin\\ios'"))
 })

@@ -5,6 +5,19 @@ const BackendManager = require("./backend-manager")
 const isDev = !app.isPackaged
 const backendManager = new BackendManager(app.isPackaged)
 
+// 单实例锁：双开会导致启动时的残留进程清理误杀另一实例的后端
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.quit()
+}
+app.on("second-instance", () => {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (win) {
+    if (win.isMinimized()) win.restore()
+    win.focus()
+  }
+})
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -33,6 +46,7 @@ ipcMain.handle("get-backend-port", () => backendManager.port)
 ipcMain.handle("get-backend-status", () => backendManager.getStatus())
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return
   try {
     await backendManager.start()
     console.log(`[main] 后端已启动，端口 ${backendManager.port}`)
