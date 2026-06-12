@@ -1124,3 +1124,37 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - `59611dc` fix(process): 关闭应用时整树清理后端与 go-ios 子进程
+
+---
+
+## 2026-06-12 — 启动残留清理 + go-ios v1.2.0 + wintun 内嵌 + 设备部署文档
+
+### 触发背景
+
+用户提出 6 项任务:①启动 MSCA 时检测并清理残留进程;②wintun.dll 缺失导致 iOS 17+ tunnel 失败(项目无处理,采纳打包内嵌方案);③发包逆向风险评估;④撰写 WDA/Android 部署文档(参考 sonic);⑤调研并更新 go-ios 最新 release(Windows 版入库);⑥先规划后执行。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 启动清理 | `_cleanupResidualProcesses()`:打包模式 taskkill 映像名清后端;ios.exe 按路径前缀过滤(PowerShell CIM);`buildIosCleanupScript` 纯函数+测试 | `electron/backend-manager.js`, `electron/backend-manager-state.js(+test)` |
+| 单实例锁 | `requestSingleInstanceLock` 防双开互杀,二次启动聚焦窗口 | `electron/main.js` |
+| go-ios 升级 | v1.0.211 → v1.2.0(2026-06-08);适配器全部子命令在新版逐一验证兼容;Linux 版实测 version/tunnel ls 正常 | `bin/ios/ios.exe`(入库), `bin/ios/ios`(本机用,gitignore) |
+| wintun 内嵌 | wintun 0.14.1 amd64 + LICENSE 入库;调研确认 wintun-go 加载器搜索 exe 同目录(无需 System32);adapter 加 `_wintun_available()` 检测与告警;ios-tunnel.bat 自动复制兜底 | `bin/ios/wintun.dll`, `bin/ios/wintun-LICENSE.txt`, `backend/app/drivers/adapters/goios_adapter.py`, `scripts/ios-tunnel.bat` |
+| 部署文档 | 新增设备部署指南(WDA Xcode 签名/导出 ipa/安装/设备准备清单/iOS17+ wintun;Android 开发者选项与品牌特定设置),链入 CLAUDE.md/操作手册;排障表补 wintun | `doc/设备部署指南.md`(新), `CLAUDE.md`, `doc/操作手册.md`, `dist/README.md` |
+| 安全评估 | Nuitka 机器码无法直接还原 .py(防普通提取足够);Electron asar 可解包(无敏感逻辑,损失低);凭证不入包;三方许可合规(wintun 附 LICENSE)。结论:无需加壳混淆 | findings.md(会话工作文件) |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| 后端 57 项单测 + ruff | ✅ |
+| 前端 14 项 + Electron 7 项单测(buildIosCleanupScript 新增) | ✅ |
+| `npm run build` | ✅ |
+| `/health` 实测 + 优雅退出 | ✅ |
+| go-ios v1.2.0 兼容性(Linux 实测 + 子命令核对) | ✅ |
+| Windows 真机回归 | ⏳ 待用户执行 |
+
+### 最终提交
+
+- 待提交后回填

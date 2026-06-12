@@ -122,7 +122,7 @@ uv run python __main__.py --port 18000
 | 设备未信任电脑 | `iOS 设备未信任电脑或配对凭证不可用` | 解锁设备并点击“信任此电脑”，必要时重新插拔 USB 或删除 `selfIdentity.plist` 后重新信任 |
 | 本地端口占用 | `本地 WDA 或 MJPEG 端口被占用` | 关闭残留的 MSCA、tidevice、ios.exe，或释放 8100/8101/8110 等端口后重试 |
 | WDA Bundle ID 不匹配 | `未找到可启动的 WDA Runner 应用或 Bundle ID 不匹配` | 确认设备已安装签名后的 WDA，并检查 `backend/config/wda_config.json` 的 `wda_bundle_id` 或 `wda_bundle_id_pattern` |
-| go-ios tunnel 失败 | `go-ios tunnel 启动失败` | iOS 17+ 以管理员身份运行 `scripts/ios-tunnel.bat`，或手动执行 `ios tunnel start` 后重试 |
+| go-ios tunnel 失败 | `go-ios tunnel 启动失败` | iOS 17+ 以管理员身份运行 `scripts/ios-tunnel.bat`（自动部署内置 wintun.dll），或手动执行 `ios tunnel start`；确认 wintun.dll 在 ios.exe 同目录或 System32 |
 | WDA session/control 失败 | `WDA 服务已连接但 session 或控制接口不可用` | 重启设备上的 WDA Runner，确认 `/status` 正常后重新启动投屏 |
 
 ## iOS 手势封装决策
