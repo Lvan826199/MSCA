@@ -82,10 +82,20 @@ if (!existsSync(sourceExe)) {
   throw new Error("未找到编译产物 msca-backend.exe")
 }
 
-rmSync(distRuntimeDir, { recursive: true, force: true })
-rmSync(resourceRuntimeDir, { recursive: true, force: true })
-cpSync(sourceRuntimeDir, distRuntimeDir, { recursive: true })
-cpSync(sourceRuntimeDir, resourceRuntimeDir, { recursive: true })
+// Windows 上有时旧目录被文件系统句柄锁定，rmSync 会报 EPERM；
+// 改为先尝试删除，失败则直接覆盖（cpSync 的 force:true 会覆盖已有文件）
+function safeRemove(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true })
+  } catch (e) {
+    if (e.code !== "EPERM" && e.code !== "EBUSY") throw e
+    console.warn(`[build] 无法删除旧目录（${e.code}），将直接覆盖: ${dir}`)
+  }
+}
+safeRemove(distRuntimeDir)
+safeRemove(resourceRuntimeDir)
+cpSync(sourceRuntimeDir, distRuntimeDir, { recursive: true, force: true })
+cpSync(sourceRuntimeDir, resourceRuntimeDir, { recursive: true, force: true })
 
 if (!existsSync(outputExe) || !existsSync(resourceExe)) {
   throw new Error("后端运行时目录复制不完整")
