@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-06-12 — 拉取最新代码并重新打包（第二次）
+
+### 触发背景
+
+用户要求拉取最新代码后按文档重新打包。本次拉取包含 go-ios agent 清理修复（`goios_adapter.py`）、Electron backend-manager 改进、后端 main.py 补丁，共 6 文件 192 行新增。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及范围 |
+|:---|:---|:---|
+| 代码拉取 | `git pull origin master`，`09d738d..a7480be`，6 文件变更 | — |
+| 进程清理 | 关闭残留 MSCA/msca-backend/ios/adb/scrcpy 进程，清理 `dist/electron/` | — |
+| 全量打包 | `npm run electron:build`（前端 1036 modules + Nuitka 639 files 链接 + electron-builder） | `dist/electron/` |
+| 后端验证 | `npm run backend:verify` → 资源 5/5，`/health` ok，`/api/devices` 200 | — |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| 前端构建（1036 modules） | ✅ |
+| Nuitka 编译（639 files） | ✅ |
+| electron-builder 打包 | ✅ `MSCA Setup 0.1.0.exe` 生成（约 143MB） |
+| `backend:verify` 资源检查 5/5 | ✅ |
+| `/health` + `/api/devices` | ✅ |
+
+### 最终提交 hash
+
+- 本次仅打包，未产生新提交
+
+---
+
 ## 2026-05-07 — iOS WDA 改用 W3C Actions API 修复控制兼容
 
 ### 触发背景
