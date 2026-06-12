@@ -1,4 +1,4 @@
-const { spawn } = require("child_process")
+const { spawn, execFile } = require("child_process")
 const path = require("path")
 const fs = require("fs")
 const http = require("http")
@@ -59,18 +59,35 @@ class BackendManager {
   async _killProcess() {
     const proc = this._process
     if (!proc) return
-    proc.kill("SIGTERM")
-    await new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        // killed 仅表示“已发送过信号”，需用 exitCode/signalCode 判断进程是否仍存活
-        if (isProcessAlive(proc)) proc.kill("SIGKILL")
-        resolve()
-      }, 5000)
-      proc.once("exit", () => {
-        clearTimeout(timeout)
-        resolve()
+    if (process.platform === "win32") {
+      // Windows 的 proc.kill 是强杀且只杀后端自身，子进程（ios.exe 等）会变孤儿残留，
+      // 占用打包目录导致下次 electron-builder 清理失败；改用 taskkill /T 整树终止
+      await new Promise((resolve) => {
+        const timeout = setTimeout(resolve, 5000)
+        proc.once("exit", () => {
+          clearTimeout(timeout)
+          resolve()
+        })
+        execFile("taskkill", ["/PID", String(proc.pid), "/T", "/F"], (err) => {
+          if (err && isProcessAlive(proc)) {
+            try { proc.kill("SIGKILL") } catch { /* 进程已退出 */ }
+          }
+        })
       })
-    })
+    } else {
+      proc.kill("SIGTERM")
+      await new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          // killed 仅表示“已发送过信号”，需用 exitCode/signalCode 判断进程是否仍存活
+          if (isProcessAlive(proc)) proc.kill("SIGKILL")
+          resolve()
+        }, 5000)
+        proc.once("exit", () => {
+          clearTimeout(timeout)
+          resolve()
+        })
+      })
+    }
     if (this._process === proc) this._process = null
   }
 

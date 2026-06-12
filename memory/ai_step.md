@@ -1059,3 +1059,37 @@ git commit -m "type(scope): subject"
 ### 补充（同日）：Windows 端打包操作流程文档
 
 用户要求提供 Windows 端打包 exe 的操作流程。在 `doc/操作手册.md` §5.4 下新增"Windows 端打包操作流程（按顺序执行）"小节：拉代码 → 同步依赖 → 全量/增量打包 → backend:verify → 产物位置 → 安装后验证（含运行日志页面与 scale 日志检查点）→ 常见问题表（镜像、icon 256 帧、signAndEditExecutable、standalone 目录）。
+
+---
+
+## 2026-06-12 — 关闭应用后子进程残留修复
+
+### 触发背景
+
+用户 Windows 打包验证反馈：上次启动的 MSCA 留下 `ios.exe`、`msca-backend.exe` 进程，electron-builder 清理 win-unpacked 时文件被占用拒绝；要求关闭 MSCA 主进程后子进程自动清除。
+
+### 根因
+
+① go-ios tunnel agent 是主机级共享守护进程，设备级 stop_wda() 刻意保留,但应用关闭路径无人负责终止 → 必然残留;② Windows 上 Node 的 proc.kill("SIGTERM") 等价 TerminateProcess,强杀后端自身且不杀子进程树,lifespan 清理无机会执行 → 子进程全部变孤儿。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| agent 清理 | 共享 agent 进程注册表 + `shutdown_tunnel_agents()`(terminate→3s→kill),tunnel 启动成功时登记 | `backend/app/drivers/adapters/goios_adapter.py` |
+| lifespan 收尾 | 关闭流程末尾调用 agent 清理 | `backend/app/main.py` |
+| Electron 树杀 | Windows 分支改 `taskkill /PID x /T /F` 整树终止(5s 超时,失败回退 SIGKILL);POSIX 保持优雅退出 | `electron/backend-manager.js` |
+| 测试 | agent 清理 4 项单元测试 | `backend/tests/test_goios_agent_cleanup.py`(新) |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| 后端单元测试(57 项)+ ruff | ✅ 全部通过 |
+| Electron 单测(6 项) | ✅ 全部通过 |
+| 后端启动→SIGTERM 优雅退出实测 | ✅ lifespan 清理完整、端口文件删除、无残留进程 |
+| Windows 真实回归(关闭 MSCA 后无 ios.exe/msca-backend.exe 残留) | ⏳ 待用户执行 |
+
+### 最终提交
+
+- 待提交后回填

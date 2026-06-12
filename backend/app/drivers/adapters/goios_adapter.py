@@ -25,6 +25,32 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
+# 共享 tunnel agent 进程注册表：agent 是主机级守护进程，多设备共用，
+# 设备级 stop_wda() 不杀；应用关闭时由 shutdown_tunnel_agents() 统一清理，
+# 否则 ios.exe 残留会占用打包目录、阻塞下次 electron-builder 清理
+_shared_agent_processes: list[subprocess.Popen] = []
+
+
+def shutdown_tunnel_agents() -> None:
+    """终止本进程启动的所有 go-ios tunnel agent（应用关闭时调用）。
+
+    提权（UAC）方式启动的 agent 为独立守护进程，无句柄可杀，不在此列。
+    """
+    while _shared_agent_processes:
+        proc = _shared_agent_processes.pop()
+        if proc.poll() is not None:
+            continue
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+            logger.info("go-ios tunnel agent 已终止 (pid=%s)", proc.pid)
+        except Exception:
+            try:
+                proc.kill()
+                logger.info("go-ios tunnel agent 已强制终止 (pid=%s)", proc.pid)
+            except Exception as err:
+                logger.warning("go-ios tunnel agent 终止失败 (pid=%s): %s", proc.pid, err)
+
 
 class GoIOSAdapter(IOSAdapterBase):
     """基于 go-ios 的 iOS 适配器，适用于 iOS ≥16.x。"""
@@ -396,6 +422,7 @@ class GoIOSAdapter(IOSAdapterBase):
                 try:
                     await self._run_cmd("tunnel", "ls", timeout=3)
                     logger.info(f"[{self.udid}] tunnel agent 就绪 ({desc}，等待 {i+1}s)")
+                    _shared_agent_processes.append(self._agent_process)
                     return True
                 except Exception:
                     continue

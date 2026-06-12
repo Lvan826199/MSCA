@@ -23,6 +23,7 @@ setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
     import os
     backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     alias_manager.init(backend_root)
@@ -31,6 +32,9 @@ async def lifespan(app: FastAPI):
     yield
     await shutdown_all_drivers()
     await device_manager.stop_async()
+    # 共享 tunnel agent 不随设备级清理终止，应用关闭时统一收尾，避免 ios.exe 残留
+    from .drivers.adapters.goios_adapter import shutdown_tunnel_agents
+    await asyncio.to_thread(shutdown_tunnel_agents)
 
 
 app = FastAPI(title="MSCA Backend", version="0.1.0", lifespan=lifespan)
