@@ -1055,3 +1055,7 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - `60cdbaa` fix(ios): 触控像素坐标换算 WDA 点坐标并新增运行日志查看
+
+### 补充（同日）：Windows 端打包操作流程文档
+
+用户要求提供 Windows 端打包 exe 的操作流程。在 `doc/操作手册.md` §5.4 下新增"Windows 端打包操作流程（按顺序执行）"小节：拉代码 → 同步依赖 → 全量/增量打包 → backend:verify → 产物位置 → 安装后验证（含运行日志页面与 scale 日志检查点）→ 常见问题表（镜像、icon 256 帧、signAndEditExecutable、standalone 目录）。
