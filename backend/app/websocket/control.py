@@ -204,10 +204,27 @@ async def _send_ios_event(driver: IOSDriver, event: ControlEvent, websocket, mes
     return success
 
 
-def _build_ios_touch_event(action: str, x: int, y: int, touch_state: dict) -> ControlEvent | None:
+def _frame_size_params(frame_w: int, frame_h: int) -> dict:
+    """帧尺寸有效时生成透传参数，供驱动做像素→点坐标换算。"""
+    if frame_w > 0 and frame_h > 0:
+        return {"width": frame_w, "height": frame_h}
+    return {}
+
+
+def _build_ios_touch_event(
+    action: str, x: int, y: int, touch_state: dict, frame_w: int = 0, frame_h: int = 0
+) -> ControlEvent | None:
     if action == "down":
         touch_state.clear()
-        touch_state.update({"start_x": x, "start_y": y, "last_x": x, "last_y": y, "moved": False})
+        touch_state.update({
+            "start_x": x,
+            "start_y": y,
+            "last_x": x,
+            "last_y": y,
+            "moved": False,
+            "frame_w": frame_w,
+            "frame_h": frame_h,
+        })
         return None
 
     if action == "move":
@@ -224,17 +241,21 @@ def _build_ios_touch_event(action: str, x: int, y: int, touch_state: dict) -> Co
         return None
 
     if not touch_state:
-        return ControlEvent("tap", {"x": x, "y": y})
+        return ControlEvent("tap", {"x": x, "y": y, **_frame_size_params(frame_w, frame_h)})
 
     start_x = int(touch_state.get("start_x", x))
     start_y = int(touch_state.get("start_y", y))
     last_x = int(touch_state.get("last_x", x))
     last_y = int(touch_state.get("last_y", y))
     moved = bool(touch_state.get("moved")) or abs(x - start_x) >= IOS_TOUCH_MOVE_THRESHOLD or abs(y - start_y) >= IOS_TOUCH_MOVE_THRESHOLD
+    frame = _frame_size_params(
+        frame_w or int(touch_state.get("frame_w", 0)),
+        frame_h or int(touch_state.get("frame_h", 0)),
+    )
     touch_state.clear()
 
     if not moved:
-        return ControlEvent("tap", {"x": x, "y": y})
+        return ControlEvent("tap", {"x": x, "y": y, **frame})
 
     return ControlEvent("swipe", {
         "fromX": start_x,
@@ -242,6 +263,7 @@ def _build_ios_touch_event(action: str, x: int, y: int, touch_state: dict) -> Co
         "toX": x if x != start_x or y != start_y else last_x,
         "toY": y if x != start_x or y != start_y else last_y,
         "duration": IOS_TOUCH_DEFAULT_DURATION,
+        **frame,
     })
 
 
@@ -257,7 +279,9 @@ async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, webs
                 return
             x = int(data.get("x", 0))
             y = int(data.get("y", 0))
-            event = _build_ios_touch_event(action, x, y, touch_state)
+            frame_w = int(data.get("width", 0))
+            frame_h = int(data.get("height", 0))
+            event = _build_ios_touch_event(action, x, y, touch_state, frame_w, frame_h)
             if event:
                 await _send_ios_event(
                     driver,
@@ -269,9 +293,10 @@ async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, webs
         elif cmd_type == "tap":
             x = int(data.get("x", 0))
             y = int(data.get("y", 0))
+            frame = _frame_size_params(int(data.get("width", 0)), int(data.get("height", 0)))
             await _send_ios_event(
                 driver,
-                ControlEvent("tap", {"x": x, "y": y}),
+                ControlEvent("tap", {"x": x, "y": y, **frame}),
                 websocket,
                 "iOS 点击失败",
             )
@@ -325,12 +350,14 @@ async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, webs
             y = int(data.get("y", 0))
             v_scroll = int(data.get("vScroll", 0))
             dy = max(-800, min(800, -v_scroll * 4))
+            frame = _frame_size_params(int(data.get("width", 0)), int(data.get("height", 0)))
             await _send_ios_event(
                 driver,
                 ControlEvent("swipe", {
                     "fromX": x, "fromY": y,
                     "toX": x, "toY": y + dy,
                     "duration": 0.3,
+                    **frame,
                 }),
                 websocket,
                 "iOS 滚动失败",

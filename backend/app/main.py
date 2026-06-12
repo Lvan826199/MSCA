@@ -6,14 +6,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api.devices import router as devices_router
 from .api.health import router as health_router
 from .api.install import router as install_router
+from .api.logs import router as logs_router
 from .api.mirror import router as mirror_router
 from .api.mirror import shutdown_all_drivers
 from .core.alias_manager import alias_manager
 from .core.device_manager import device_manager
+from .core.log_buffer import setup_logging
 from .websocket.control import router as ws_control_router
 from .websocket.devices import router as ws_devices_router
 from .websocket.handler import router as ws_router
 from .websocket.video import router as ws_video_router
+
+# 模块导入时即配置日志，确保 uvicorn 直接加载 app.main:app 时同样生效
+setup_logging()
 
 
 @asynccontextmanager
@@ -39,6 +44,7 @@ app.add_middleware(
 )
 
 app.include_router(health_router)
+app.include_router(logs_router, prefix="/api")
 app.include_router(devices_router, prefix="/api")
 app.include_router(mirror_router, prefix="/api")
 app.include_router(install_router, prefix="/api")

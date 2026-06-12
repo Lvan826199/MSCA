@@ -106,6 +106,10 @@ class IOSDriver(AbstractDeviceDriver):
         self._session_id = ""
         self._screen_width = 0
         self._screen_height = 0
+        # WDA 坐标系为点（point，逻辑分辨率），MJPEG 帧为像素（点 × scale）。
+        # 控制指令必须把前端的帧像素坐标换算为窗口点坐标，否则 2x/3x 设备触控位置整体偏移。
+        self._window_width = 0
+        self._window_height = 0
         self._http: aiohttp.ClientSession | None = None
         self._frame_count = 0
         # 投屏生命周期锁：防止并发 start/stop 重复分配端口、泄漏资源
@@ -159,11 +163,23 @@ class IOSDriver(AbstractDeviceDriver):
                     logger.warning("[%s] WDA session 创建失败: %s", self.device_id, err)
 
                 try:
-                    size = await self._get_screenshot_size()
-                    if not size:
-                        size = await self._get_window_size()
-                    self._screen_width = size.get("width", 375)
-                    self._screen_height = size.get("height", 812)
+                    window = await self._get_window_size()
+                    self._window_width = int(window.get("width") or 0)
+                    self._window_height = int(window.get("height") or 0)
+
+                    pixel = await self._get_screenshot_size()
+                    self._screen_width = int(pixel.get("width") or self._window_width or 375)
+                    self._screen_height = int(pixel.get("height") or self._window_height or 812)
+                    if self._window_width and self._screen_width:
+                        logger.info(
+                            "[%s] iOS 屏幕尺寸: 窗口 %sx%s pt, 帧 %sx%s px (scale≈%.2f)",
+                            self.device_id,
+                            self._window_width,
+                            self._window_height,
+                            self._screen_width,
+                            self._screen_height,
+                            self._screen_width / self._window_width,
+                        )
                 except Exception as err:
                     logger.warning("[%s] iOS 屏幕尺寸获取失败，使用默认值: %s", self.device_id, err)
                     self._screen_width, self._screen_height = 375, 812
@@ -255,6 +271,25 @@ class IOSDriver(AbstractDeviceDriver):
             )
             return False
 
+    def _to_window_points(
+        self, x: float, y: float, frame_width: int = 0, frame_height: int = 0
+    ) -> tuple[int, int]:
+        """把前端 MJPEG 帧像素坐标换算为 WDA 窗口点坐标。
+
+        frame_width/frame_height 为前端实际渲染帧尺寸（随事件携带，旋转后仍准确）；
+        缺失时回退到驱动启动时探测的帧尺寸。窗口点尺寸不可用时原样透传。
+        """
+        src_w = frame_width or self._screen_width
+        src_h = frame_height or self._screen_height
+        win_w, win_h = self._window_width, self._window_height
+        if win_w > 0 and win_h > 0 and src_w > 0 and src_h > 0:
+            if src_w != win_w or src_h != win_h:
+                x = x * win_w / src_w
+                y = y * win_h / src_h
+            x = min(max(x, 0), win_w - 1)
+            y = min(max(y, 0), win_h - 1)
+        return round(x), round(y)
+
     async def send_event(self, event: ControlEvent) -> bool:
         if not self._adapter.wda_info or not self._http:
             logger.warning("[%s] WDA 信息或 HTTP 会话不可用，无法发送 iOS 控制指令", self.device_id)
@@ -267,8 +302,13 @@ class IOSDriver(AbstractDeviceDriver):
 
         try:
             if event.action == "tap":
-                x = event.params.get("x", 0)
-                y = event.params.get("y", 0)
+                x, y = self._to_window_points(
+                    event.params.get("x", 0),
+                    event.params.get("y", 0),
+                    int(event.params.get("width", 0)),
+                    int(event.params.get("height", 0)),
+                )
+                logger.debug("[%s] iOS tap -> (%s, %s) pt", self.device_id, x, y)
                 actions_payload = {
                     "actions": [
                         {
@@ -289,11 +329,19 @@ class IOSDriver(AbstractDeviceDriver):
                 logger.warning("[%s] iOS touch down/move/up 已废弃，应由上层聚合为 tap 或 swipe", self.device_id)
                 return False
             elif event.action == "swipe":
-                from_x = event.params.get("fromX", 0)
-                from_y = event.params.get("fromY", 0)
-                to_x = event.params.get("toX", 0)
-                to_y = event.params.get("toY", 0)
+                frame_w = int(event.params.get("width", 0))
+                frame_h = int(event.params.get("height", 0))
+                from_x, from_y = self._to_window_points(
+                    event.params.get("fromX", 0), event.params.get("fromY", 0), frame_w, frame_h
+                )
+                to_x, to_y = self._to_window_points(
+                    event.params.get("toX", 0), event.params.get("toY", 0), frame_w, frame_h
+                )
                 duration_ms = int(event.params.get("duration", 0.3) * 1000)
+                logger.debug(
+                    "[%s] iOS swipe -> (%s, %s) => (%s, %s) pt",
+                    self.device_id, from_x, from_y, to_x, to_y,
+                )
                 actions_payload = {
                     "actions": [
                         {

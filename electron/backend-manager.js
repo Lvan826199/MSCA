@@ -143,8 +143,13 @@ class BackendManager {
     } else {
       const resPath = process.resourcesPath || path.join(__dirname, "..")
       const backendRuntimeDir = path.join(resPath, "resources", "msca-backend")
-      // 打包模式显式指定端口文件路径（Nuitka 产物的默认落点不可靠）
-      args = ["--port", String(this._port), "--port-file", portFile]
+      // 打包模式显式指定端口文件路径（Nuitka 产物的默认落点不可靠）；
+      // 日志目录与端口文件同样写到 userData，安装目录（Program Files）可能只读
+      args = [
+        "--port", String(this._port),
+        "--port-file", portFile,
+        "--log-dir", path.join(path.dirname(portFile), "logs"),
+      ]
       opts = {
         cwd: backendRuntimeDir,
         stdio: ["ignore", "pipe", "pipe"],

@@ -12,6 +12,11 @@ const routes = [
     component: () => import("@/views/MirrorView.vue"),
   },
   {
+    path: "/logs",
+    name: "Logs",
+    component: () => import("@/views/LogsView.vue"),
+  },
+  {
     path: "/settings",
     name: "Settings",
     component: () => import("@/views/SettingsView.vue"),

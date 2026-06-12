@@ -9,6 +9,7 @@
 
 import argparse
 import atexit
+import os
 import signal
 import socket
 import sys
@@ -63,7 +64,16 @@ def main() -> None:
         default=None,
         help="写入实际端口的文件路径（默认: 项目根目录/.backend-port）",
     )
+    parser.add_argument(
+        "--log-dir",
+        default=None,
+        help="日志文件目录（默认: backend/logs；打包模式由 Electron 传入 userData/logs）",
+    )
     args = parser.parse_args()
+
+    # 通过环境变量传给 app.main 的 setup_logging（uvicorn 按 import 字符串加载 app）
+    if args.log_dir:
+        os.environ["MSCA_LOG_DIR"] = args.log_dir
 
     # 端口文件路径：默认项目根目录
     if args.port_file:

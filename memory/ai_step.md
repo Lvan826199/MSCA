@@ -1012,3 +1012,46 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - 见本次 docs 提交 hash（CLAUDE.md + .gitignore + 本记录）
+
+---
+
+## 2026-06-12 — iOS 真机触控坐标修复 + 后端运行日志查看
+
+### 触发背景
+
+用户在 Windows 端执行 N1 真机回归发现：iOS 17.7.4 滑动正常但无法点击；iOS 15.1 触控位置与页面响应位置不一致（返回、音量快捷键正常）；并希望桌面端有地方查看后台日志。
+
+### 根因
+
+前端发送的是 MJPEG 帧**像素**坐标，后端 iOS 驱动原样写入 WDA W3C Actions——而 WDA 坐标系是**点**（逻辑分辨率）。iPhone 2x/3x scale 导致坐标系统性放大：15.1 表现为位置偏移，17.7.4 表现为 tap 越界被忽略（swipe 被钳制仍可触发滚动，故"滑动正常"）。快捷键不涉及坐标所以正常。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 坐标修复 | 投屏启动时分别记录窗口点尺寸与帧像素尺寸；新增 `_to_window_points()` 像素→点换算并钳制；tap/swipe 统一换算 | `backend/app/drivers/ios.py` |
+| 帧尺寸透传 | iOS touch/tap/scroll 分支把前端 `width/height` 透传进 ControlEvent（down 暂存、up 并入） | `backend/app/websocket/control.py` |
+| 运行日志 | 新增环形缓冲(2000条)+滚动文件(5MB×3) logging；`GET /api/logs` 查询接口；`--log-dir` 参数 | `backend/app/core/log_buffer.py`(新), `backend/app/api/logs.py`(新), `backend/app/main.py`, `backend/__main__.py` |
+| Electron | 打包模式传 `--log-dir`（userData/logs，安装目录可能只读） | `electron/backend-manager.js` |
+| 前端 | 新增"运行日志"页面（自动刷新/跟随滚动/复制），侧边栏入口与路由 | `frontend/src/views/LogsView.vue`(新), `frontend/src/App.vue`, `frontend/src/router/index.js` |
+| 测试 | 坐标换算 6 项 + 日志缓冲 4 项单元测试 | `backend/tests/test_ios_control.py`, `backend/tests/test_log_buffer.py`(新) |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| 后端单元测试（unittest，53 项） | ✅ 全部通过 |
+| 后端 ruff check | ✅ All checks passed |
+| 前端单元测试（node --test，14 项）+ Electron 单测（2 项） | ✅ 全部通过 |
+| `npm run build` | ✅ 构建成功（LogsView 独立 chunk 2.26KB） |
+| `/health` + `/api/logs` 实测（端口 18000） | ✅ 返回正常，`backend/logs/backend.log` 落盘正常 |
+| 真机回归（17.7.4 点击、15.1 坐标、日志页面） | ⏳ 待用户在 Windows 端执行 |
+
+### 注意事项
+
+- `uv run` 会被本机镜像把 `backend/uv.lock` 重写为阿里云 URL，本次已 `git checkout` 还原（与第三轮记录的坑一致）
+- `npm run lint`（--fix）会顺手改动历史文件的属性顺序，本次已还原无关文件改动；存量 5 个 lint 报错（useVideoDecoder 等）为既有问题，未在本轮处理
+
+### 最终提交
+
+- 待提交后回填
