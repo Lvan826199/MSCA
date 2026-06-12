@@ -318,13 +318,31 @@ class GoIOSAdapter(IOSAdapterBase):
         self.wda_info = None
         logger.debug(f"[{self.udid}] go-ios 设备级子进程已清理（tunnel agent 保留）")
 
+    def _wintun_available(self) -> bool:
+        """检查内核 tunnel 所需的 wintun.dll 是否可被 go-ios 找到。
+
+        go-ios（wintun-go 加载器）以 LOAD_LIBRARY_SEARCH_APPLICATION_DIR |
+        LOAD_LIBRARY_SEARCH_SYSTEM32 搜索：ios.exe 同目录或 System32 任一存在即可。
+        userspace 模式不需要 wintun，仅影响提权内核模式。
+        """
+        if os.name != "nt":
+            return True
+        import shutil
+        exe = self._ios_bin if os.path.isabs(self._ios_bin) else (shutil.which(self._ios_bin) or self._ios_bin)
+        system_root = os.environ.get("SystemRoot", r"C:\Windows")
+        candidates = [
+            os.path.join(os.path.dirname(os.path.abspath(exe)), "wintun.dll"),
+            os.path.join(system_root, "System32", "wintun.dll"),
+        ]
+        return any(os.path.isfile(p) for p in candidates)
+
     async def _ensure_tunnel(self) -> None:
         """确保 go-ios tunnel agent 正在运行（iOS 17+ 必需）。
 
         三阶段策略：
         1. 检测 tunnel 是否已在运行
-        2. 尝试 --userspace 模式（无需管理员权限）
-        3. 提权启动默认模式（弹出 UAC/密码框）
+        2. 尝试 --userspace 模式（无需管理员权限，不依赖 wintun.dll）
+        3. 提权启动默认模式（弹出 UAC/密码框，Windows 依赖 wintun.dll）
         """
         tunnel_env = {**os.environ, "ENABLE_GO_IOS_AGENT": "1"}
 
@@ -345,6 +363,12 @@ class GoIOSAdapter(IOSAdapterBase):
             return
 
         # ── 阶段 3：提权启动默认模式 ──
+        if not self._wintun_available():
+            logger.warning(
+                "[%s] 未找到 wintun.dll（内核 tunnel 必需）。应用已在 bin/ios/ 内置该文件；"
+                "若当前使用 PATH 中的 ios.exe，请将 wintun.dll 放到其同目录或 C:\\Windows\\System32",
+                self.udid,
+            )
         from .privilege import check_is_admin, launch_elevated
 
         if check_is_admin():
@@ -380,6 +404,12 @@ class GoIOSAdapter(IOSAdapterBase):
             except Exception as e:
                 logger.warning(f"[{self.udid}] 提权启动异常: {e}")
 
+        wintun_hint = (
+            ""
+            if self._wintun_available()
+            else "\n注意：未检测到 wintun.dll（Windows 内核 tunnel 必需），"
+            "请将 bin/ios/wintun.dll 放到 ios.exe 同目录或 C:\\Windows\\System32"
+        )
         raw_error = (
             "go-ios tunnel 启动失败（iOS 17+ 必需）。\n"
             "尝试过的方式：\n"
@@ -389,6 +419,7 @@ class GoIOSAdapter(IOSAdapterBase):
             "  - Windows: 以管理员身份运行 scripts/ios-tunnel.bat\n"
             "  - macOS/Linux: 运行 scripts/ios-tunnel.sh\n"
             "  - 或手动执行: ios tunnel start（需管理员/sudo）"
+            + wintun_hint
         )
         raise RuntimeError(diagnose_wda_failure(raw_error).format())
 

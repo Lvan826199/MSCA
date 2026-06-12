@@ -78,3 +78,6 @@ task_plan.md
 findings.md
 progress.md
 .planning/
+
+# 本机验证用 Linux 版 go-ios(仓库仅存 Windows 版 ios.exe + wintun.dll)
+bin/ios/ios

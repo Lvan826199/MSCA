@@ -49,6 +49,20 @@ exit /b 1
 
 :found
 echo [INFO] 使用: %IOS_BIN%
+
+:: ── wintun.dll 检查（内核 tunnel 必需；go-ios 搜索 exe 同目录与 System32） ──
+for %%a in ("%IOS_BIN%") do set "IOS_DIR=%%~dpa"
+if exist "%IOS_DIR%wintun.dll" goto :wintun_ok
+if exist "%SystemRoot%\System32\wintun.dll" goto :wintun_ok
+if exist "%~dp0..\bin\ios\wintun.dll" (
+    echo [INFO] 复制内置 wintun.dll 到 System32...
+    copy /y "%~dp0..\bin\ios\wintun.dll" "%SystemRoot%\System32\wintun.dll" >nul
+    if !errorlevel! equ 0 goto :wintun_ok
+)
+echo [WARN] 未找到 wintun.dll，内核 tunnel 可能启动失败
+echo [WARN] 请从 https://www.wintun.net/ 下载，将 wintun.dll 放到 ios.exe 同目录或 C:\Windows\System32
+:wintun_ok
+
 echo [INFO] 启动 tunnel...
 echo.
 
