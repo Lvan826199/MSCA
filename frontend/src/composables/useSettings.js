@@ -32,11 +32,8 @@ const DEFAULTS = {
   },
 }
 
-const isElectron = typeof window !== "undefined" && !!window.electronAPI
-
 // 单例状态
 let _settings = null
-let _initialized = false
 
 function loadSettings() {
   if (_settings) return _settings
@@ -51,7 +48,6 @@ function loadSettings() {
 
   // 深度合并默认值
   _settings = deepMerge(structuredClone(DEFAULTS), stored || {})
-  _initialized = true
   return _settings
 }
 

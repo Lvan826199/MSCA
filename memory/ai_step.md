@@ -1196,3 +1196,40 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - 24a2241�2a00759�46bfb02(fix/feat/docs 三笔)
+
+---
+
+## 2026-06-18 - 缺陷排查与前端/测试链路修复
+
+### 触发背景
+
+用户要求接手既有项目，主动找出历史实现中的 bug 并修复。本轮先以可复现验证为边界，围绕现有 lint、测试入口、WebCodecs 运行时兼容和项目必选验证执行排查。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 前端 lint 修复 | 移除未使用的 WebSocket error 参数；清理 `useSettings` 中未使用的 Electron/初始化状态变量 | `frontend/src/composables/useDeviceControl.js`, `frontend/src/composables/useSettings.js` |
+| WebCodecs 健壮性 | 改为通过 `globalThis.VideoDecoder` / `globalThis.EncodedVideoChunk` 访问浏览器 WebCodecs 全局对象；缺失时给出明确错误，避免不支持环境直接触发未定义异常 | `frontend/src/composables/useVideoDecoder.js` |
+| 测试入口补齐 | 新增根目录 `npm run test`、`test:frontend`、`test:backend`；前端使用 Node 原生 test runner；后端通过脚本固定 cwd 到 `backend/` 并将 `UV_CACHE_DIR` 默认落到仓库内 `.uv-cache` | `package.json`, `frontend/package.json`, `scripts/test-backend.mjs` |
+| 自动格式修正 | `eslint --fix` 调整 Vue 模板属性顺序 | `frontend/src/components/DeviceCard.vue`, `frontend/src/components/DeviceControlBar.vue`, `frontend/src/views/HomeView.vue`, `frontend/src/views/MirrorView.vue` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `npm run lint` | 通过 |
+| `npm run test` | 通过：前端 14 项、后端 57 项 |
+| `npm run build` | 通过，成功生成 `frontend/dist/` |
+| 后端健康检查 | 通过：使用 `npm.cmd run dev:backend` 启动临时后端，`GET /health` 返回 `{"status":"ok"}`，端口 `18000` |
+
+### 注意事项
+
+- 首次尝试 `npm` 在 PowerShell 下被执行策略拦截，后续统一使用 `npm.cmd` 验证。
+- 首次尝试 `uv` 使用用户目录缓存失败，后续将 `UV_CACHE_DIR` 指向仓库内 `.uv-cache`；新增后端测试脚本已内置该默认值。
+- 后端健康检查后确认 `18000-18009` 无监听残留；`.backend-port` 为 ignored 临时文件且仍残留为 `18000`，删除动作被自动审批服务拒绝，未绕过处理。
+- 本轮未执行发布前可选的 `npm run backend:build` / `npm run backend:verify`，也未执行耗时较长的 `npm run electron:build`。
+
+### 最终提交
+
+- 未提交；当前 HEAD：`5bf9aff`

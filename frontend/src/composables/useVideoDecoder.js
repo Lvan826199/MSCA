@@ -265,6 +265,12 @@ export function useVideoDecoder(deviceId) {
 
   function decodeFrame(h264Data, isKey) {
     try {
+      const EncodedVideoChunkCtor = globalThis.EncodedVideoChunk
+      if (!EncodedVideoChunkCtor) {
+        error.value = "当前浏览器不支持 WebCodecs 视频解码"
+        return
+      }
+
       let frameData
       let chunkType
 
@@ -280,7 +286,7 @@ export function useVideoDecoder(deviceId) {
         chunkType = isKey ? "key" : "delta"
       }
 
-      const chunk = new EncodedVideoChunk({
+      const chunk = new EncodedVideoChunkCtor({
         type: chunkType,
         timestamp: timestampCounter++,
         data: frameData,
@@ -326,13 +332,18 @@ export function useVideoDecoder(deviceId) {
     if (decoder) return
     const canvas = canvasRef.value
     if (!canvas) return
+    const VideoDecoderCtor = globalThis.VideoDecoder
+    if (!VideoDecoderCtor || !globalThis.EncodedVideoChunk) {
+      error.value = "当前浏览器不支持 WebCodecs 视频解码"
+      return
+    }
     const ctx = canvas.getContext("2d")
 
     try {
       const avcConfig = buildAvcConfig(firstKeyFrame)
       hasDescription = !!avcConfig
 
-      decoder = new VideoDecoder({
+      decoder = new VideoDecoderCtor({
         output: (frame) => {
           if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
             canvas.width = frame.displayWidth

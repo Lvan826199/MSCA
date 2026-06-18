@@ -55,7 +55,7 @@
         clearable
         @keyup.enter="onSendText"
       />
-      <el-button size="small" type="primary" @click="onSendText" :disabled="!textInput">
+      <el-button size="small" type="primary" :disabled="!textInput" @click="onSendText">
         发送
       </el-button>
     </div>

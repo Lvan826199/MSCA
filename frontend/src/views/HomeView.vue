@@ -17,7 +17,7 @@
         >
           iOS 全部投屏 ({{ iosOnlineCount }})
         </el-button>
-        <el-button type="primary" :icon="Refresh" @click="onRefresh" :loading="refreshing">
+        <el-button type="primary" :icon="Refresh" :loading="refreshing" @click="onRefresh">
           刷新
         </el-button>
       </div>

@@ -89,7 +89,7 @@ export function useDeviceControl(deviceId) {
       ws = null
     }
 
-    ws.onerror = (e) => {
+    ws.onerror = () => {
       error.value = "控制连接失败"
       connected.value = false
     }

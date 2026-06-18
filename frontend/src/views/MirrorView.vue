@@ -48,11 +48,11 @@
       <DeviceMirrorPanel
         v-for="id in devices"
         :key="id"
+        :ref="(el) => setPanelRef(id, el)"
         :device-id="id"
         :device-name="getDeviceName(id)"
         :sync-mode="syncMode"
         :sync-broadcast="broadcastControl"
-        :ref="(el) => setPanelRef(id, el)"
         @stopped="onDeviceStopped"
       />
     </div>
