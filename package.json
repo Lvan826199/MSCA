@@ -9,6 +9,8 @@
     "dev:backend": "uv run --project backend python backend/__main__.py",
     "build": "npm --prefix frontend run build",
     "build:web": "node scripts/build-web.mjs",
+    "sync:agents": "node scripts/sync-agent-docs.mjs",
+    "check:agents": "node scripts/sync-agent-docs.mjs --check",
     "test": "npm run test:frontend && npm run test:backend",
     "test:frontend": "npm --prefix frontend run test",
     "test:backend": "node scripts/test-backend.mjs",

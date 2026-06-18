@@ -1232,4 +1232,40 @@ git commit -m "type(scope): subject"
 
 ### 最终提交
 
-- 未提交；当前 HEAD：`5bf9aff`
+- `4608e83` fix(frontend): 修复解码兼容与测试入口
+
+---
+
+## 2026-06-18 - AGENTS/CLAUDE 指令文档同步
+
+### 触发背景
+
+用户要求将 `AGENTS.md` 纳入提交，并解决 Claude 使用 `CLAUDE.md`、Codex 使用 `AGENTS.md` 导致同一套项目指令需要维护两份的问题。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| Codex 指令入库 | 将现有 `AGENTS.md` 作为 Codex 项目指令文件纳入版本控制 | `AGENTS.md` |
+| 同步脚本 | 新增 `sync-agent-docs.mjs`，支持从较新的 `CLAUDE.md`/`AGENTS.md` 生成另一个文件，并保留标题、planning skill 路径和文档自引用等工具专属差异 | `scripts/sync-agent-docs.mjs` |
+| npm 命令 | 新增 `npm run sync:agents` 与 `npm run check:agents` | `package.json` |
+| 操作记录 | 补正上一轮实际提交号，并记录本轮文档同步方案 | `memory/ai_step.md` |
+
+### 使用方式
+
+| 命令 | 说明 |
+|:---|:---|
+| `npm run sync:agents` | 根据最近修改的 `CLAUDE.md` 或 `AGENTS.md` 同步另一个文件 |
+| `npm run sync:agents -- --from=claude` | 明确从 `CLAUDE.md` 同步到 `AGENTS.md` |
+| `npm run sync:agents -- --from=agents` | 明确从 `AGENTS.md` 同步到 `CLAUDE.md` |
+| `npm run check:agents` | 只校验两份文件是否同步，不写文件 |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `npm run check:agents` | 通过，输出 `Agent docs are in sync.` |
+
+### 最终提交
+
+- 待提交；提交后在最终回复中给出 hash
