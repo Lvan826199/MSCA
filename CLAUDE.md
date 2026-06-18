@@ -161,6 +161,25 @@ uv add --dev <package>
 - **使用方式**：开始复杂任务时调用该 Skill 创建计划文件；每完成一个阶段同步更新状态
 - **注意**：规划工作文件（`task_plan.md`、`findings.md`、`progress.md`、`.planning/`）为会话工作内存，已加入 `.gitignore`，不要提交
 
+## AI 指令文档同步
+
+本项目同时维护 Claude 使用的 `CLAUDE.md` 与 Codex 使用的 `AGENTS.md`。两份文件内容应保持一致，仅允许保留标题、planning skill 路径、文档自引用等工具专属差异。
+
+同步命令：
+
+```bash
+npm run sync:agents                 # 按最近修改时间同步另一份
+npm run sync:agents -- --from=claude # 从 CLAUDE.md 生成 AGENTS.md
+npm run sync:agents -- --from=agents # 从 AGENTS.md 生成 CLAUDE.md
+npm run check:agents                # 只校验不同步，不写文件
+```
+
+提交前检查：
+
+- `.pre-commit-config.yaml` 已配置 `check-agent-docs` 本地钩子。
+- 提交涉及 `CLAUDE.md`、`AGENTS.md`、`scripts/sync-agent-docs.mjs` 或 `package.json` 时，会自动执行 `node scripts/sync-agent-docs.mjs --check`。
+- 若检查失败，先运行 `npm run sync:agents`，确认 diff 后再提交。
+
 ## UI 设计规范
 
 本项目 UI 设计遵循 **ui-ux-pro-max** Skill 所定义的现代桌面应用设计语言，确保界面专业、一致且易用。

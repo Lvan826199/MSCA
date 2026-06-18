@@ -7,3 +7,11 @@ repos:
         files: ^backend/
       - id: ruff-format
         files: ^backend/
+  - repo: local
+    hooks:
+      - id: check-agent-docs
+        name: Check AGENTS.md and CLAUDE.md stay in sync
+        entry: node scripts/sync-agent-docs.mjs --check
+        language: system
+        pass_filenames: false
+        files: ^(AGENTS\.md|CLAUDE\.md|scripts/sync-agent-docs\.mjs|package\.json)$

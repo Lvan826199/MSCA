@@ -1268,4 +1268,32 @@ git commit -m "type(scope): subject"
 
 ### 最终提交
 
+- `ed1405c` docs(agent): 同步 Claude 与 Codex 指令文档
+
+---
+
+## 2026-06-18 - AGENTS/CLAUDE 同步检查接入 pre-commit
+
+### 触发背景
+
+用户询问同步命令何时触发，并要求将 AGENTS/CLAUDE 同步检查做成自动触发，避免后续手动维护两份指令文档时遗漏。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| pre-commit 钩子 | 新增本地 `check-agent-docs` 钩子，提交涉及 `AGENTS.md`、`CLAUDE.md`、同步脚本或 `package.json` 时自动执行同步校验 | `.pre-commit-config.yaml` |
+| 指令文档说明 | 在 AI 指令文档中补充同步命令、校验命令和 pre-commit 触发规则 | `CLAUDE.md`, `AGENTS.md` |
+| 文档同步 | 先修改 `CLAUDE.md`，再执行 `npm run sync:agents -- --from=claude` 生成 `AGENTS.md` | `CLAUDE.md`, `AGENTS.md` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `npm run sync:agents -- --from=claude` | 通过，输出 `Synced AGENTS.md from CLAUDE.md.` |
+| `npm run check:agents` | 通过，输出 `Agent docs are in sync.` |
+| `node scripts/sync-agent-docs.mjs --check` | 通过，验证 pre-commit hook entry 可执行 |
+
+### 最终提交
+
 - 待提交；提交后在最终回复中给出 hash
