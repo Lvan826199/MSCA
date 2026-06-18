@@ -9,10 +9,12 @@
 
 import argparse
 import atexit
+import json
 import os
 import signal
 import socket
 import sys
+import time
 from pathlib import Path
 
 import uvicorn
@@ -44,15 +46,30 @@ def find_available_port(start: int, attempts: int = MAX_PORT_ATTEMPTS, host: str
     raise RuntimeError(f"端口 {start}-{start + attempts - 1} 均被占用")
 
 
-def write_port_file(path: Path, port: int) -> None:
+def port_metadata_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.json")
+
+
+def write_port_file(path: Path, port: int, host: str = "127.0.0.1") -> None:
     path.write_text(str(port), encoding="utf-8")
+    metadata = {
+        "host": host,
+        "port": port,
+        "pid": os.getpid(),
+        "started_at": time.time(),
+    }
+    try:
+        port_metadata_path(path).write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def remove_port_file(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        pass
+    for target in (path, port_metadata_path(path)):
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def main() -> None:
@@ -109,7 +126,7 @@ def main() -> None:
         if not port_available(args.host, port):
             continue
 
-        write_port_file(port_file, port)
+        write_port_file(port_file, port, args.host)
         print(f"[backend] 启动于端口 {port}，端口文件: {port_file}")
         try:
             uvicorn.run("app.main:app", host=args.host, port=port)

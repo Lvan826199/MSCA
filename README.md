@@ -87,6 +87,9 @@ npm run dev
 # 仅构建前端
 npm run build
 
+# 日常一键验收
+npm run verify
+
 # 编译后端为独立可执行文件（Nuitka）
 npm run backend:build
 
@@ -103,6 +106,7 @@ npm run electron:build
 | :--- | :--- |
 | `npm run electron:dev` | 一键启动桌面端开发模式（推荐） |
 | `npm run dev` | 仅启动前端开发服务器 |
+| `npm run verify` | 日常一键验收：规则入口校验、前端 lint 检查、前/后端/Electron 单测、前端构建 |
 | `npm run build` | 构建 Vue 前端 |
 | `npm run backend:build` | Nuitka 编译后端为独立可执行文件（Windows 为 .exe，Linux/macOS 无后缀） |
 | `npm run backend:verify` | 验证后端编译产物是否正常运行（资源检查 + `/health` + `/api/devices`） |
@@ -169,11 +173,8 @@ msca/
 
 发布前建议按顺序执行以下验证：
 
-1. 单元测试全量通过：
-   - 后端：`cd backend && uv run python -m unittest discover -s tests`
-   - 前端：`cd frontend && node --test "src/**/*.test.js"`
-   - Electron：`node --test "electron/*.test.js"`
-2. `npm run build`：验证 Vue 前端可正常构建。
+1. `npm run verify`：日常一键验收，覆盖规则入口校验、前端 lint 检查、前/后端/Electron 单测与前端构建。
+2. 如涉及后端启动链路，执行 `npm run dev:backend` 后请求 `/health` 做实测。
 3. `npm run backend:build`：Nuitka 编译后端 standalone 产物。
 4. `npm run backend:verify`：验证产物可启动，并通过 `/health` 与 `/api/devices` 检查。
 5. `npm run electron:build`：生成 Windows 安装包与免安装目录。

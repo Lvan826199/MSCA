@@ -1296,4 +1296,42 @@ git commit -m "type(scope): subject"
 
 ### 最终提交
 
-- 待提交；提交后在最终回复中给出 hash
+- `54e158f` chore(agent): 接入指令文档同步检查
+
+---
+
+## 2026-06-18 - AI 指令三层隔离方案落地
+
+### 触发背景
+
+用户提出统一采用“三层隔离”方案：`CLAUDE.md` 作为唯一完整规则源，`AGENTS.md` 只作为 Codex 入口，`MEMORY.md` 记录非敏感共享记忆，本地工具目录只保留本机私有配置且不入库。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 单一规则源 | 将 `AGENTS.md` 改为短入口模板，只要求 Codex 读取并遵守 `CLAUDE.md`，不再复制完整规则正文 | `AGENTS.md` |
+| 三层隔离说明 | 将 `CLAUDE.md` 中旧的双文档同步说明替换为“三层隔离”规则 | `CLAUDE.md` |
+| 共享记忆 | 新增 `MEMORY.md`，用于记录跨会话、跨机器共享的非敏感项目记忆 | `MEMORY.md` |
+| 校验脚本 | 删除旧的全文同步脚本，新增入口模板校验脚本 | `scripts/sync-agent-docs.mjs`, `scripts/check-agent-entry.mjs` |
+| npm/pre-commit | `npm run check:agents` 改为校验 `AGENTS.md` 是否正确指向 `CLAUDE.md`；pre-commit 钩子同步改为入口校验 | `package.json`, `.pre-commit-config.yaml` |
+| 本地配置忽略 | 精确忽略 `.claude/settings.local.json`、`.claude/worktrees/`、`.agent/`、`.agents/`、`.codex/`、`.Codex/`；`.claude/` 下作为项目共享资产维护的 skills 继续入库 | `.gitignore`, `CLAUDE.md`, `MEMORY.md` |
+| 一键验收 | 新增 `npm run verify`，串联规则入口校验、前端 lint 检查、前端/Electron/后端单测与前端构建 | `package.json`, `frontend/package.json`, `README.md`, `CLAUDE.md`, `doc/下一步计划.md` |
+| 端口元数据 | `.backend-port` 保持纯数字兼容旧链路；新增旁路 `.backend-port.json` 记录 host、port、pid、started_at，清理端口文件时同步清理元数据 | `backend/__main__.py`, `backend/tests/test_backend_entry.py`, `.gitignore` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `npm run check:agents` | 通过，输出 `AGENTS.md correctly points Codex to CLAUDE.md.` |
+| `npm run verify` | 通过，覆盖 `check:agents`、`lint:check`、前端 14 项单测、Electron 7 项单测、后端 57 项单测与 `npm run build` |
+| 后端健康检查 | 通过，`/health` 返回 `{"status":"ok"}`，`.backend-port.json` 生成 host/port/pid/started_at 元数据；确认 `18000-18009` 无监听残留 |
+
+### 注意事项
+
+- 本轮曾短暂尝试将整个 `.claude/` 视作本地配置移出索引，但用户指出该目录包含项目共享 skills。已修正为只忽略 `.claude/settings.local.json` 与 `.claude/worktrees/`，不再移除 `.claude/` 下已入库的共享 skills。
+- 健康检查使用强制停止临时后端，`.backend-port` 与 `.backend-port.json` 为 ignored 自动生成文件，可能在本地残留但不会进入提交；已确认无端口监听残留。
+
+### 最终提交
+
+- `989ea6d` chore(verify): 统一 AI 入口与项目验收流程

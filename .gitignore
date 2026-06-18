@@ -52,8 +52,17 @@ logs/
 .env.local
 .env.*.local
 
+# AI 助手本地配置（权限、缓存、机器路径等只留本机）
+.claude/settings.local.json
+.claude/worktrees/
+.agent/
+.agents/
+.codex/
+.Codex/
+
 # Backend port file (auto-generated)
 .backend-port
+.backend-port.json
 
 # AAB signing keys (禁止提交到远程仓库)
 bin/android/aab_keys/*.keystore

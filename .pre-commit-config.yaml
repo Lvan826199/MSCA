@@ -10,8 +10,8 @@ repos:
   - repo: local
     hooks:
       - id: check-agent-docs
-        name: Check AGENTS.md and CLAUDE.md stay in sync
-        entry: node scripts/sync-agent-docs.mjs --check
+        name: Check AGENTS.md points to CLAUDE.md
+        entry: node scripts/check-agent-entry.mjs
         language: system
         pass_filenames: false
-        files: ^(AGENTS\.md|CLAUDE\.md|scripts/sync-agent-docs\.mjs|package\.json)$
+        files: ^(AGENTS\.md|CLAUDE\.md|scripts/check-agent-entry\.mjs|package\.json)$

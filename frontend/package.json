@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "node --test \"src/**/*.test.js\"",
     "lint": "eslint . --ext .vue,.js --fix",
+    "lint:check": "eslint . --ext .vue,.js",
     "format": "prettier --write \"src/**/*.{vue,js,css}\""
   },
   "dependencies": {

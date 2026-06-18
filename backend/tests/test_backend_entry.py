@@ -1,6 +1,8 @@
 """后端入口端口探测逻辑测试。"""
 
 import importlib.util
+import json
+import os
 import socket
 import unittest
 from pathlib import Path
@@ -41,8 +43,16 @@ class PortProbeTests(unittest.TestCase):
             port_file = Path(tmpdir) / ".backend-port"
             entry.write_port_file(port_file, 18001)
             self.assertEqual(port_file.read_text(encoding="utf-8"), "18001")
+            metadata_file = entry.port_metadata_path(port_file)
+            self.assertTrue(metadata_file.exists())
+            metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+            self.assertEqual(metadata["host"], "127.0.0.1")
+            self.assertEqual(metadata["port"], 18001)
+            self.assertEqual(metadata["pid"], os.getpid())
+            self.assertIsInstance(metadata["started_at"], float)
             entry.remove_port_file(port_file)
             self.assertFalse(port_file.exists())
+            self.assertFalse(metadata_file.exists())
             # 重复删除不应抛异常
             entry.remove_port_file(port_file)
 
