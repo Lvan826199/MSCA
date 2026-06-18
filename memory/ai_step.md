@@ -1334,4 +1334,4 @@ git commit -m "type(scope): subject"
 
 ### 最终提交
 
-- `989ea6d` chore(verify): 统一 AI 入口与项目验收流程
+- `1979dfd` chore(verify): 统一 AI 入口与项目验收流程
