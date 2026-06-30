@@ -69,7 +69,7 @@ npm run electron:dev
 ```
 
 该命令会自动完成以下操作，无需手动干预：
-1. 启动 Vite 前端开发服务器（localhost:5173）
+1. 启动 Vite 前端开发服务器（默认端口和搜索范围读取 `config/dev-server.json`，被占用时自动选择后续可用端口）
 2. 启动 Python 后端服务（从 18000 起自动探测可用端口，实际端口写入 `.backend-port`）
 3. 等待前端就绪后打开 Electron 桌面窗口
 
@@ -79,7 +79,7 @@ npm run electron:dev
 npm run dev
 ```
 
-浏览器访问 http://localhost:5173（需要单独启动后端服务）。
+浏览器访问启动日志中输出的 Vite 地址（默认值见 `config/dev-server.json`，需要单独启动后端服务）。
 
 ### 构建打包
 
@@ -104,7 +104,7 @@ npm run electron:build
 
 | 命令 | 说明 |
 | :--- | :--- |
-| `npm run electron:dev` | 一键启动桌面端开发模式（推荐） |
+| `npm run electron:dev` | 一键启动桌面端开发模式（推荐，按 `config/dev-server.json` 自动选择可用前端端口） |
 | `npm run dev` | 仅启动前端开发服务器 |
 | `npm run verify` | 日常一键验收：规则入口校验、前端 lint 检查、前/后端/Electron 单测、前端构建 |
 | `npm run build` | 构建 Vue 前端 |

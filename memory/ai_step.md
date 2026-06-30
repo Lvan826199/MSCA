@@ -1335,3 +1335,42 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - `1979dfd` chore(verify): 统一 AI 入口与项目验收流程
+
+---
+
+## 2026-06-30 - Electron 开发端口配置化与桌面端重启验证
+
+### 触发背景
+
+用户启动桌面端进行内部上线前测试时，发现前端开发服务原先依赖固定 `5173` 端口；该端口被其他程序占用后，Electron 开发模式会无法稳定启动。用户指出端口硬编码不合理，要求改为可配置方案。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 开发端口配置 | 新增 `config/dev-server.json`，集中维护前端开发 host、默认端口、端口搜索范围以及后端 proxy 默认配置 | `config/dev-server.json` |
+| 配置读取 | 新增 `scripts/dev-server-config.cjs`，为 Vite、Electron 主进程和启动脚本提供统一读取与校验逻辑 | `scripts/dev-server-config.cjs` |
+| Electron 开发启动 | 将 `npm run electron:dev` 改为 `node scripts/electron-dev.mjs`，启动时自动探测可用前端端口，并通过 `MSCA_FRONTEND_URL` 传给 Electron | `package.json`, `scripts/electron-dev.mjs`, `electron/main.js` |
+| Vite 配置 | Vite 开发服务和 proxy 默认值改为读取统一配置；`.backend-port` 仍优先用于实际后端端口 | `frontend/vite.config.js` |
+| Windows 启动稳定性 | 开发脚本改为直接通过 Node 启动 Vite CLI、通过 Electron exe 启动桌面端，避免 Windows 下 `.cmd` + `shell: true` 引发 Node DEP0190 警告 | `scripts/electron-dev.mjs` |
+| 文档同步 | 将 README 与 AI 规则文档中的端口说明改为引用配置文件，不再写死启动地址 | `README.md`, `CLAUDE.md` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `node --check scripts/electron-dev.mjs` | 通过 |
+| `node --check scripts/dev-server-config.cjs` | 通过 |
+| `node --check electron/main.js` | 通过 |
+| `npm run verify` | 通过，覆盖 `check:agents`、`lint:check`、前端 14 项单测、Electron 7 项单测、后端 57 项单测与前端构建 |
+| `npm run electron:dev` | 通过，`5173` 被占用时自动选择 `http://127.0.0.1:5174/`，未再出现 DEP0190 警告 |
+| 后端健康检查 | 通过，`.backend-port` 为 `18000`，`GET http://127.0.0.1:18000/health` 返回 `{"status":"ok"}` |
+
+### 注意事项
+
+- 当前桌面端开发实例已重新启动，前端为 `http://127.0.0.1:5174/`，后端为 `18000`。
+- 若后续需要调整默认前端开发端口或搜索范围，只修改 `config/dev-server.json`；临时覆盖可继续使用 `MSCA_FRONTEND_HOST`、`MSCA_FRONTEND_PORT`、`MSCA_FRONTEND_PORT_ATTEMPTS`。
+
+### 最终提交
+
+- 待提交后补充

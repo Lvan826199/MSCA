@@ -116,7 +116,7 @@ uv pip install tidevice
 
 ```bash
 npm run dev          # 启动 Vite 开发服务器（Web 端）
-npm run electron:dev # 启动 Electron 开发模式
+npm run electron:dev # 启动 Electron 开发模式（按 config/dev-server.json 自动选择可用前端端口）
 ```
 
 ### 后端开发

@@ -1,0 +1,11 @@
+{
+  "frontend": {
+    "host": "127.0.0.1",
+    "port": 5173,
+    "portSearchAttempts": 20
+  },
+  "backend": {
+    "host": "127.0.0.1",
+    "port": 18000
+  }
+}

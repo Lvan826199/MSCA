@@ -5,6 +5,17 @@ const BackendManager = require("./backend-manager")
 const isDev = !app.isPackaged
 const backendManager = new BackendManager(app.isPackaged)
 
+function getDevServerUrl() {
+  if (process.env.MSCA_FRONTEND_URL) {
+    return process.env.MSCA_FRONTEND_URL
+  }
+  const {
+    buildFrontendDevServerUrl,
+    getFrontendDevServerConfig,
+  } = require("../scripts/dev-server-config.cjs")
+  return buildFrontendDevServerUrl(getFrontendDevServerConfig(process.env, path.join(__dirname, "..")))
+}
+
 // 单实例锁：双开会导致启动时的残留进程清理误杀另一实例的后端
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
@@ -33,7 +44,7 @@ function createWindow() {
   })
 
   if (isDev) {
-    win.loadURL("http://localhost:5173")
+    win.loadURL(getDevServerUrl())
     win.webContents.openDevTools()
   } else {
     win.loadFile(path.join(__dirname, "../frontend/dist/index.html"))

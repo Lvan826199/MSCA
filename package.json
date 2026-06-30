@@ -15,7 +15,7 @@
     "test:frontend": "npm --prefix frontend run test",
     "test:electron": "node --test \"electron/**/*.test.js\"",
     "test:backend": "node scripts/test-backend.mjs",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
+    "electron:dev": "node scripts/electron-dev.mjs",
     "electron:build": "npm run build && npm run backend:build && cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder",
     "backend:build": "node scripts/build-backend.mjs",
     "backend:verify": "node scripts/verify-backend.mjs",
