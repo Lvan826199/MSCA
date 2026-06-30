@@ -1374,3 +1374,42 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - `14b50af` fix(electron): 配置化桌面端开发端口
+
+---
+
+## 2026-06-30 - 修复 iOS17/18 go-ios 启动与日志页切换断流
+
+### 触发背景
+
+用户反馈 iOS15、iOS16 设备投屏正常，但 iOS17、iOS18 设备无法连接；同时运行日志页与投屏页切换时，原投屏会断开，影响内部上线前验证。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| iOS17/18 复现 | 使用 iOS17.7.4 设备 `49687f67a4c70fbd027e19b4a5e40218acdc06e4` 调用 `/api/mirror/start` 复现；确认设备发现、go-ios tunnel userspace 均正常，失败点为 `go-ios runwda` 参数 | 后端运行日志 |
+| go-ios 参数修复 | 将 go-ios 1.2.0 的 WDA 启动参数从错误的 `--testbundleid` 改为 `--testrunnerbundleid`，并补齐必需的 `--xctestconfig=WebDriverAgentRunner.xctest` | `backend/app/drivers/adapters/goios_adapter.py`, `backend/config/wda_config.json` |
+| WDA 错误诊断 | 修复二次诊断已格式化错误时被“排障建议”关键词误判为端口占用的问题；`runwda` 退出时将输出落盘到 `backend/logs/go-ios-*-runwda.log` 并在主日志中带出尾部内容 | `backend/app/drivers/adapters/base.py`, `backend/app/drivers/adapters/goios_adapter.py` |
+| iOS 截图尺寸 | 修复 WDA 截图为 PNG 时被 JPEG 解析器误扫成异常大尺寸的问题；iOS17 复测启动尺寸从异常 `5639x58824` 修正为 `1668x2224` | `backend/app/drivers/ios.py` |
+| 投屏页生命周期 | 将 `MirrorView` 纳入 Vue `KeepAlive`，新增侧边栏“投屏监控”入口；切换到日志/设置页不再卸载投屏页，不再触发后端 stop，只有返回、全部停止或关闭面板时才停止投屏 | `frontend/src/App.vue`, `frontend/src/views/MirrorView.vue` |
+| 文档同步 | 更新 go-ios runwda 参数说明 | `doc/项目核心技术点.md` |
+| 回归测试 | 新增 go-ios runwda 参数、WDA 诊断、iOS PNG 尺寸解析单测 | `backend/tests/test_goios_runwda.py`, `backend/tests/test_wda_diagnostics.py`, `backend/tests/test_ios_image_size.py` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `npm run test:backend` | 通过，后端测试 62 项通过 |
+| `npm run verify` | 通过，覆盖 `check:agents`、`lint:check`、前端 14 项单测、Electron 7 项单测、后端 62 项单测与前端构建 |
+| 桌面端启动 | 通过，`npm run electron:dev` 启动后前端 `http://127.0.0.1:5174/`，后端 `18000`，`/health` 返回 `{"status":"ok"}` |
+| iOS17 真机启动 | 通过，`POST /api/mirror/49687f67a4c70fbd027e19b4a5e40218acdc06e4/start` 返回 `{"status":"started","width":1668,"height":2224}`，随后已调用 stop 释放设备 |
+
+### 注意事项
+
+- iOS17/18 失败的直接原因不是设备离线，也不是 tunnel 失败，而是 go-ios 1.2.0 的 `runwda` 参数组合不完整/参数名过期。
+- 当前桌面端开发实例已重新启动，保留给用户继续测试；API 复测时手动启动的 iOS17 投屏已停止，不占用设备。
+- `backend/logs/go-ios-*-runwda.log` 为运行日志产物，不应入库。
+
+### 最终提交
+
+- 待提交后补充

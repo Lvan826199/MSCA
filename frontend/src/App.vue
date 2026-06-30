@@ -15,6 +15,10 @@
           <el-icon><Monitor /></el-icon>
           <span>设备管理</span>
         </el-menu-item>
+        <el-menu-item index="/mirror">
+          <el-icon><VideoCamera /></el-icon>
+          <span>投屏监控</span>
+        </el-menu-item>
         <el-menu-item index="/logs">
           <el-icon><Document /></el-icon>
           <span>运行日志</span>
@@ -31,7 +35,11 @@
       </div>
     </el-aside>
     <el-main class="app-main">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <KeepAlive include="MirrorView">
+          <component :is="Component" />
+        </KeepAlive>
+      </router-view>
     </el-main>
     </el-container>
   </el-config-provider>
@@ -40,7 +48,7 @@
 <script setup>
 import { computed } from "vue"
 import { useRoute } from "vue-router"
-import { Document, Monitor, Setting } from "@element-plus/icons-vue"
+import { Document, Monitor, Setting, VideoCamera } from "@element-plus/icons-vue"
 import zhCn from "element-plus/es/locale/lang/zh-cn"
 import { useWebSocket } from "@/composables/useWebSocket"
 

@@ -31,6 +31,7 @@ def load_wda_config() -> dict:
     defaults = {
         "wda_bundle_id": "",
         "wda_bundle_id_pattern": "com.*.xctrunner",
+        "xctest_config": "WebDriverAgentRunner.xctest",
         "mjpeg_port_on_device": 9100,
         "wda_port_on_device": 8100,
     }
@@ -115,9 +116,12 @@ class WDAFailureHint:
 def diagnose_wda_failure(error: object) -> WDAFailureHint:
     """将 WDA/tidevice/go-ios 常见错误转换为可定位提示。"""
     text = str(error).strip()
-    lower = text.lower()
+    # 上层可能再次诊断已经格式化过的 WDAFailureHint。只用主错误信息分类，
+    # 避免“排障建议”里的关键词（例如“端口占用”）覆盖真实原因。
+    diagnostic_text = text.split("。排障建议：", 1)[0]
+    lower = diagnostic_text.lower()
 
-    if "端口" in text and "占用" in text:
+    if "端口" in diagnostic_text and "占用" in diagnostic_text:
         return WDAFailureHint(
             "port_occupied",
             "本地 WDA 或 MJPEG 端口被占用，自动清理后仍无法释放",

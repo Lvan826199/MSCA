@@ -8,10 +8,12 @@
 """
 
 import asyncio
+import datetime
 import fnmatch
 import json
 import logging
 import os
+import re
 import subprocess
 
 from .base import (
@@ -62,6 +64,7 @@ class GoIOSAdapter(IOSAdapterBase):
         self._tunnel_process: subprocess.Popen | None = None
         self._mjpeg_forward_process: subprocess.Popen | None = None
         self._agent_process: subprocess.Popen | None = None
+        self._wda_log_path = ""
 
     async def _run_cmd(self, *args, timeout: int = 30) -> str:
         """执行 go-ios 命令并返回 stdout。"""
@@ -226,6 +229,8 @@ class GoIOSAdapter(IOSAdapterBase):
         """启动完整的 runwda + 端口转发。"""
         # 检测 WDA bundle ID
         bundle_id = await self.detect_wda_bundle_id()
+        config = load_wda_config()
+        xctest_config = config.get("xctest_config", "WebDriverAgentRunner.xctest")
 
         # 启动 WDA API 端口转发
         logger.info(f"[{self.udid}] 启动 go-ios 端口转发: 本地 {port} → 设备 {wda_device_port}")
@@ -235,31 +240,31 @@ class GoIOSAdapter(IOSAdapterBase):
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
-        # 构建 runwda 命令（关键：传递 --bundleid）
-        wda_cmd = [self._ios_bin, "runwda", f"--udid={self.udid}"]
+        # 构建 runwda 命令（关键：传递 --bundleid 和 --testrunnerbundleid）
+        wda_cmd = _build_runwda_command(self._ios_bin, self.udid, bundle_id, xctest_config)
         if bundle_id:
-            wda_cmd.extend([f"--bundleid={bundle_id}", f"--testbundleid={bundle_id}"])
             logger.info(f"[{self.udid}] 启动 WDA (go-ios)，bundle ID: {bundle_id}")
         else:
             logger.info(f"[{self.udid}] 启动 WDA (go-ios)，使用默认 bundle ID")
 
-        # 长生命周期进程：输出重定向到 DEVNULL，避免 PIPE 写满导致子进程死锁
-        self._wda_process = subprocess.Popen(
-            wda_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        self._wda_process, self._wda_log_path = self._spawn_logged_process(wda_cmd, "runwda")
 
         # 等待 WDA 就绪
         for _i in range(30):
             await asyncio.sleep(1)
             if self._wda_process.poll() is not None:
                 raw_error = f"WDA 进程退出 (exit code {self._wda_process.returncode})"
+                log_tail = self._read_log_tail(self._wda_log_path)
+                if log_tail:
+                    raw_error = f"{raw_error}\n最近 go-ios runwda 输出:\n{log_tail}"
                 hint = diagnose_wda_failure(raw_error)
                 logger.error(
-                    "[%s] go-ios WDA 进程退出，分类=%s，错误=%s，建议=%s",
+                    "[%s] go-ios WDA 进程退出，分类=%s，错误=%s，建议=%s，日志=%s",
                     self.udid,
                     hint.category,
                     raw_error,
                     hint.suggestion,
+                    self._wda_log_path or "无",
                 )
                 await self.stop_wda()
                 raise RuntimeError(hint.format())
@@ -317,6 +322,38 @@ class GoIOSAdapter(IOSAdapterBase):
         self._mjpeg_forward_process = None
         self.wda_info = None
         logger.debug(f"[{self.udid}] go-ios 设备级子进程已清理（tunnel agent 保留）")
+
+    def _spawn_logged_process(self, cmd: list[str], label: str) -> tuple[subprocess.Popen, str]:
+        """启动长生命周期进程，并将输出写入独立日志文件。"""
+        log_path = self._process_log_path(label)
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "ab", buffering=0) as log_file:
+            header = (
+                f"\n--- {datetime.datetime.now().isoformat(timespec='seconds')} "
+                f"{' '.join(cmd)} ---\n"
+            ).encode("utf-8", errors="replace")
+            log_file.write(header)
+            proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+        return proc, log_path
+
+    def _process_log_path(self, label: str) -> str:
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        logs_dir = os.path.join(backend_dir, "logs")
+        safe_udid = re.sub(r"[^A-Za-z0-9_.-]+", "_", self.udid or "unknown")
+        safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", label)
+        return os.path.join(logs_dir, f"go-ios-{safe_udid}-{safe_label}.log")
+
+    def _read_log_tail(self, path: str, max_bytes: int = 4096) -> str:
+        if not path or not os.path.isfile(path):
+            return ""
+        try:
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - max_bytes))
+                return f.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            return ""
 
     def _wintun_available(self) -> bool:
         """检查内核 tunnel 所需的 wintun.dll 是否可被 go-ios 找到。
@@ -492,3 +529,19 @@ class GoIOSAdapter(IOSAdapterBase):
             return True, "IPA 安装成功"
         except Exception as e:
             return False, str(e)
+
+
+def _build_runwda_command(
+    ios_bin: str,
+    udid: str,
+    bundle_id: str = "",
+    xctest_config: str = "WebDriverAgentRunner.xctest",
+) -> list[str]:
+    cmd = [ios_bin, "runwda", f"--udid={udid}"]
+    if bundle_id:
+        cmd.extend([
+            f"--bundleid={bundle_id}",
+            f"--testrunnerbundleid={bundle_id}",
+            f"--xctestconfig={xctest_config}",
+        ])
+    return cmd

@@ -90,6 +90,10 @@ import { useSettings } from "@/composables/useSettings"
 import { useDevices } from "@/composables/useDevices"
 const DeviceMirrorPanel = defineAsyncComponent(() => import("@/components/DeviceMirrorPanel.vue"))
 
+defineOptions({
+  name: "MirrorView",
+})
+
 const route = useRoute()
 const router = useRouter()
 const { settings: appSettings } = useSettings()
@@ -186,6 +190,26 @@ function addDevices() {
   showAddDevice.value = false
 }
 
+function routeDeviceIds() {
+  const deviceParam = route.query.device
+  const ids = Array.isArray(deviceParam) ? deviceParam : [deviceParam]
+  return ids.filter(Boolean)
+}
+
+function applyRouteDevices({ replace = false } = {}) {
+  if (route.name !== "Mirror") return
+  const ids = routeDeviceIds()
+  if (replace) {
+    devices.value = ids
+    return
+  }
+  for (const id of ids) {
+    if (!devices.value.includes(id)) {
+      devices.value.push(id)
+    }
+  }
+}
+
 function onDeviceStopped(deviceId) {
   devices.value = devices.value.filter((id) => id !== deviceId)
 }
@@ -234,18 +258,17 @@ onMounted(() => {
   // 订阅全局设备列表 WebSocket
   connectDeviceWs()
   fetchDevices()
+  applyRouteDevices({ replace: true })
+})
 
-  // 从 URL query 获取初始设备
-  const deviceParam = route.query.device
-  if (deviceParam) {
-    const ids = Array.isArray(deviceParam) ? deviceParam : [deviceParam]
-    devices.value = ids.filter(Boolean)
-  }
+watch([() => route.name, () => route.query.device], () => {
+  applyRouteDevices()
 })
 
 let _cleaning = false
 
-// 必须用 onBeforeUnmount：onUnmounted 执行时模板 ref 已被置 null，panelRefs 为空
+// KeepAlive 下切换到日志/设置不会卸载本组件，投屏会继续运行。
+// 真正卸载（应用退出、缓存释放）时再清理后端投屏资源。
 onBeforeUnmount(() => {
   if (_cleaning) return
   _cleaning = true

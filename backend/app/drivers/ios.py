@@ -18,7 +18,14 @@ IOS_WDA_PORT_STEP = 10
 
 
 def _jpeg_size(data: bytes) -> dict:
-    """解析 JPEG 图片尺寸，避免为尺寸探测引入 Pillow 依赖。"""
+    """解析 WDA 截图尺寸，避免为尺寸探测引入 Pillow 依赖。"""
+    if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+        return {
+            "width": int.from_bytes(data[16:20], "big"),
+            "height": int.from_bytes(data[20:24], "big"),
+        }
+    if len(data) < 4 or data[:2] != b"\xff\xd8":
+        return {}
     index = 2
     while index + 9 < len(data):
         if data[index] != 0xFF:
