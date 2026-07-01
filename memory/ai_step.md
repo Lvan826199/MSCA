@@ -1445,3 +1445,36 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - `be78fc4` fix(frontend): 保持投屏页切换日志不断流
+
+---
+
+## 2026-07-01 - 桌面端运行日志改为右侧抽屉
+
+### 触发背景
+
+用户提出 Web 端可以切换日志页面，但桌面端投屏测试时不适合切换页面，希望运行日志放到侧边，点击呼出。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 桌面日志入口 | 桌面端点击侧边栏“运行日志”不再路由跳转，而是在当前工作台右侧展开/收起日志抽屉 | `frontend/src/App.vue` |
+| Web 行为保留 | 非 Electron 环境继续使用原有 `/logs` 页面路由，Web 端页面切换行为不变 | `frontend/src/App.vue`, `frontend/src/router/index.js` |
+| 日志组件复用 | `LogsView` 同时供桌面抽屉和 Web 路由复用；路由改为静态引用，避免 Vite 同时静态/动态导入警告 | `frontend/src/router/index.js` |
+| 抽屉样式 | 新增右侧日志抽屉布局与进入/退出过渡，抽屉内保持自动刷新、手动刷新、复制全部能力 | `frontend/src/App.vue` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `npm --prefix frontend run lint:check` | 通过 |
+| `npm --prefix frontend run build` | 通过，且无 `LogsView` 同时静态/动态导入警告 |
+| `npm run verify` | 通过，覆盖 `check:agents`、`lint:check`、前端 14 项单测、Electron 7 项单测、后端 62 项单测与前端构建 |
+
+### 注意事项
+
+- 桌面端“运行日志”现在是抽屉开关，不再改变当前页面；Web 端仍可进入 `/logs` 页面。
+
+### 最终提交
+
+- 待提交后补充

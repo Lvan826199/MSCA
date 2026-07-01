@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory } from "vue-router"
+import LogsView from "@/views/LogsView.vue"
 
 const routes = [
   {
@@ -14,7 +15,7 @@ const routes = [
   {
     path: "/logs",
     name: "Logs",
-    component: () => import("@/views/LogsView.vue"),
+    component: LogsView,
   },
   {
     path: "/settings",

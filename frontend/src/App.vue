@@ -7,9 +7,10 @@
         <span class="app-version">v0.1.0</span>
       </div>
       <el-menu
-        :default-active="route.path"
-        router
+        :default-active="activeMenu"
+        :router="!isElectron"
         class="app-menu"
+        @select="handleMenuSelect"
       >
         <el-menu-item index="/">
           <el-icon><Monitor /></el-icon>
@@ -38,21 +39,43 @@
       <MirrorView v-if="mirrorMounted" v-show="route.name === 'Mirror'" />
       <router-view v-if="route.name !== 'Mirror'" />
     </el-main>
+    <transition name="log-drawer">
+      <aside v-if="isElectron && logDrawerOpen" class="log-drawer">
+        <div class="log-drawer-header">
+          <div class="log-drawer-title">
+            <el-icon><Document /></el-icon>
+            <span>运行日志</span>
+          </div>
+          <el-button :icon="Close" size="small" circle @click="logDrawerOpen = false" />
+        </div>
+        <LogsView />
+      </aside>
+    </transition>
     </el-container>
   </el-config-provider>
 </template>
 
 <script setup>
 import { computed, ref, watch } from "vue"
-import { useRoute } from "vue-router"
-import { Document, Monitor, Setting, VideoCamera } from "@element-plus/icons-vue"
+import { useRoute, useRouter } from "vue-router"
+import { Close, Document, Monitor, Setting, VideoCamera } from "@element-plus/icons-vue"
 import zhCn from "element-plus/es/locale/lang/zh-cn"
 import { useWebSocket } from "@/composables/useWebSocket"
+import { useConnection } from "@/composables/useConnection"
+import LogsView from "@/views/LogsView.vue"
 import MirrorView from "@/views/MirrorView.vue"
 
 const route = useRoute()
+const router = useRouter()
 const { status } = useWebSocket()
+const { isElectron } = useConnection()
 const mirrorMounted = ref(route.name === "Mirror")
+const logDrawerOpen = ref(false)
+
+const activeMenu = computed(() => {
+  if (isElectron && logDrawerOpen.value) return "/logs"
+  return route.path
+})
 
 watch(
   () => route.name,
@@ -73,6 +96,18 @@ const connectionText = computed(() => {
   if (status.value === "connecting") return "连接中..."
   return "未连接"
 })
+
+function handleMenuSelect(index) {
+  if (!isElectron) return
+  if (index === "/logs") {
+    logDrawerOpen.value = !logDrawerOpen.value
+    return
+  }
+  logDrawerOpen.value = false
+  if (route.path !== index) {
+    router.push(index)
+  }
+}
 </script>
 
 <style>
@@ -150,5 +185,70 @@ html, body, #app {
   padding: 20px;
   min-height: 0;
   overflow: hidden;
+}
+
+.log-drawer {
+  width: min(560px, 44vw);
+  min-width: 420px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #18191a;
+  border-left: 1px solid #333;
+  box-shadow: -10px 0 28px rgba(0, 0, 0, 0.28);
+  padding: 14px;
+  z-index: 20;
+}
+
+.log-drawer-header {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.log-drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e5eaf3;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.log-drawer .logs-view {
+  min-height: 0;
+}
+
+.log-drawer .logs-header h3 {
+  display: none;
+}
+
+.log-drawer .logs-header {
+  margin-bottom: 8px;
+}
+
+.log-drawer .logs-actions {
+  width: 100%;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.log-drawer-enter-active,
+.log-drawer-leave-active {
+  transition: width 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
+}
+
+.log-drawer-enter-from,
+.log-drawer-leave-to {
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  transform: translateX(24px);
+  padding-left: 0;
+  padding-right: 0;
 }
 </style>
