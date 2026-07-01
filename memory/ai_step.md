@@ -1444,4 +1444,4 @@ git commit -m "type(scope): subject"
 
 ### 最终提交
 
-- 待提交后补充
+- `be78fc4` fix(frontend): 保持投屏页切换日志不断流
