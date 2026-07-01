@@ -1477,4 +1477,4 @@ git commit -m "type(scope): subject"
 
 ### 最终提交
 
-- 待提交后补充
+- `2b67aeb` feat(frontend): 桌面端日志改为侧边抽屉
