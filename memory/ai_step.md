@@ -1412,4 +1412,4 @@ git commit -m "type(scope): subject"
 
 ### 最终提交
 
-- 待提交后补充
+- `02d35c8` fix(ios): 修复高版本设备投屏启动
