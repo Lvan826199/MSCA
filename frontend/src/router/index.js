@@ -9,7 +9,7 @@ const routes = [
   {
     path: "/mirror",
     name: "Mirror",
-    component: () => import("@/views/MirrorView.vue"),
+    component: { name: "MirrorRoutePlaceholder", render: () => null },
   },
   {
     path: "/logs",

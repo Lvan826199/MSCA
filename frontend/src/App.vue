@@ -35,25 +35,32 @@
       </div>
     </el-aside>
     <el-main class="app-main">
-      <router-view v-slot="{ Component }">
-        <KeepAlive include="MirrorView">
-          <component :is="Component" />
-        </KeepAlive>
-      </router-view>
+      <MirrorView v-if="mirrorMounted" v-show="route.name === 'Mirror'" />
+      <router-view v-if="route.name !== 'Mirror'" />
     </el-main>
     </el-container>
   </el-config-provider>
 </template>
 
 <script setup>
-import { computed } from "vue"
+import { computed, ref, watch } from "vue"
 import { useRoute } from "vue-router"
 import { Document, Monitor, Setting, VideoCamera } from "@element-plus/icons-vue"
 import zhCn from "element-plus/es/locale/lang/zh-cn"
 import { useWebSocket } from "@/composables/useWebSocket"
+import MirrorView from "@/views/MirrorView.vue"
 
 const route = useRoute()
 const { status } = useWebSocket()
+const mirrorMounted = ref(route.name === "Mirror")
+
+watch(
+  () => route.name,
+  (name) => {
+    if (name === "Mirror") mirrorMounted.value = true
+  },
+  { immediate: true }
+)
 
 const connectionTag = computed(() => {
   if (status.value === "connected") return "success"
