@@ -18,6 +18,7 @@ class BackendManager {
     this._port = DEFAULT_PORT
     this._restartCount = 0
     this._stopping = false
+    this._usingExternalBackend = false
     // 重启互斥标志：避免快速反复崩溃时触发多条并行重启链
     this._restarting = false
     // 代际 token：进程更替后使旧的健康检查轮询失效
@@ -30,7 +31,7 @@ class BackendManager {
   }
 
   get isRunning() {
-    return isProcessAlive(this._process)
+    return this._usingExternalBackend || isProcessAlive(this._process)
   }
 
   getStatus() {
@@ -39,6 +40,20 @@ class BackendManager {
 
   async start() {
     this._stopping = false
+    this._usingExternalBackend = false
+    const existingPort = await this._findHealthyExistingPort()
+    if (existingPort !== null) {
+      this._port = existingPort
+      this._usingExternalBackend = true
+      try {
+        fs.writeFileSync(this._portFilePath(), String(this._port))
+      } catch {
+        // 写入失败不影响复用已有后端，前端仍可通过 IPC 获取端口
+      }
+      console.log(`[backend] 复用已有健康后端，端口 ${this._port}`)
+      return this._port
+    }
+
     await this._cleanupResidualProcesses()
     this._port = await this._findAvailablePort()
     await this._spawn()
@@ -53,6 +68,10 @@ class BackendManager {
 
   async stop() {
     this._stopping = true
+    if (this._usingExternalBackend) {
+      this._usingExternalBackend = false
+      return
+    }
     await this._killProcess()
   }
 
@@ -275,6 +294,58 @@ class BackendManager {
       if (ok) return port
     }
     throw new Error(`端口 ${DEFAULT_PORT}-${DEFAULT_PORT + MAX_PORT_ATTEMPTS - 1} 均被占用`)
+  }
+
+  async _findHealthyExistingPort() {
+    const candidates = new Set([DEFAULT_PORT])
+    try {
+      const parsed = parsePortFile(fs.readFileSync(this._portFilePath(), "utf-8"))
+      if (parsed !== null) candidates.add(parsed)
+    } catch {
+      // 端口文件不存在时仅探测默认端口
+    }
+    for (let i = 1; i < MAX_PORT_ATTEMPTS; i++) {
+      candidates.add(DEFAULT_PORT + i)
+    }
+    for (const port of candidates) {
+      if (await this._isBackendHealthy(port)) return port
+    }
+    return null
+  }
+
+  _isBackendHealthy(port) {
+    return new Promise((resolve) => {
+      let settled = false
+      const finish = (value) => {
+        if (settled) return
+        settled = true
+        resolve(value)
+      }
+      const req = http.get(`http://127.0.0.1:${port}/health`, (res) => {
+        let body = ""
+        res.setEncoding("utf8")
+        res.on("data", (chunk) => {
+          body += chunk
+          if (body.length > 1024) req.destroy()
+        })
+        res.on("end", () => {
+          if (res.statusCode !== 200) {
+            finish(false)
+            return
+          }
+          try {
+            finish(JSON.parse(body).status === "ok")
+          } catch {
+            finish(false)
+          }
+        })
+      })
+      req.on("error", () => finish(false))
+      req.setTimeout(1000, () => {
+        req.destroy()
+        finish(false)
+      })
+    })
   }
 
   _waitForHealth() {

@@ -8,7 +8,7 @@
       </div>
       <el-menu
         :default-active="activeMenu"
-        :router="!isElectron"
+        :router="false"
         class="app-menu"
         @select="handleMenuSelect"
       >
@@ -40,7 +40,7 @@
       <router-view v-if="route.name !== 'Mirror'" />
     </el-main>
     <transition name="log-drawer">
-      <aside v-if="isElectron && logDrawerOpen" class="log-drawer">
+      <aside v-if="logDrawerOpen" class="log-drawer">
         <div class="log-drawer-header">
           <div class="log-drawer-title">
             <el-icon><Document /></el-icon>
@@ -61,19 +61,17 @@ import { useRoute, useRouter } from "vue-router"
 import { Close, Document, Monitor, Setting, VideoCamera } from "@element-plus/icons-vue"
 import zhCn from "element-plus/es/locale/lang/zh-cn"
 import { useWebSocket } from "@/composables/useWebSocket"
-import { useConnection } from "@/composables/useConnection"
 import LogsView from "@/views/LogsView.vue"
 import MirrorView from "@/views/MirrorView.vue"
 
 const route = useRoute()
 const router = useRouter()
 const { status } = useWebSocket()
-const { isElectron } = useConnection()
 const mirrorMounted = ref(route.name === "Mirror")
 const logDrawerOpen = ref(false)
 
 const activeMenu = computed(() => {
-  if (isElectron && logDrawerOpen.value) return "/logs"
+  if (logDrawerOpen.value) return "/logs"
   return route.path
 })
 
@@ -81,6 +79,10 @@ watch(
   () => route.name,
   (name) => {
     if (name === "Mirror") mirrorMounted.value = true
+    if (name === "Logs") {
+      logDrawerOpen.value = true
+      router.replace("/")
+    }
   },
   { immediate: true }
 )
@@ -98,7 +100,6 @@ const connectionText = computed(() => {
 })
 
 function handleMenuSelect(index) {
-  if (!isElectron) return
   if (index === "/logs") {
     logDrawerOpen.value = !logDrawerOpen.value
     return

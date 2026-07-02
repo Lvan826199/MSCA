@@ -128,7 +128,9 @@ def diagnose_wda_failure(error: object) -> WDAFailureHint:
             "关闭残留的 MSCA、tidevice、ios.exe 或占用 8100/8101/8110 等端口的进程后重试",
         )
 
-    if any(keyword in lower for keyword in ("invalid service", "not trusted", "pair", "lockdown", "usbmux")):
+    if any(keyword in lower for keyword in ("invalid service", "not trusted", "pair", "lockdown", "usbmux")) or any(
+        keyword in diagnostic_text for keyword in ("未信任", "配对", "配對", "信任此电脑", "信任此電腦")
+    ):
         return WDAFailureHint(
             "device_not_trusted",
             "iOS 设备未信任电脑或配对凭证不可用",

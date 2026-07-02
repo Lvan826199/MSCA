@@ -16,6 +16,13 @@ class WdaDiagnosticsTests(unittest.TestCase):
 
         self.assertEqual(hint.category, "port_occupied")
 
+    def test_formatted_chinese_pairing_failure_stays_device_not_trusted(self):
+        hint = diagnose_wda_failure(
+            "iOS 设备未信任电脑或配对凭证不可用。排障建议：解锁设备并点击“信任此电脑”"
+        )
+
+        self.assertEqual(hint.category, "device_not_trusted")
+
 
 if __name__ == "__main__":
     unittest.main()

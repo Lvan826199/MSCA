@@ -48,7 +48,7 @@ def get_driver(device_id: str) -> AbstractDeviceDriver:
         if device_info.platform == "ios":
             from ..drivers.ios import IOSDriver
             adapter = device_manager.create_ios_adapter(device_id, device_info.version)
-            _drivers[device_id] = IOSDriver(device_id, adapter)
+            _drivers[device_id] = IOSDriver(device_id, adapter, ios_version=device_info.version)
         else:
             _drivers[device_id] = AndroidDriver(device_id)
     return _drivers[device_id]

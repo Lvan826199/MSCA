@@ -4,6 +4,7 @@ import asyncio
 import base64
 import logging
 import socket
+import time
 from collections.abc import Callable
 
 import aiohttp
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 IOS_WDA_BASE_PORT = 8100
 IOS_WDA_PORT_STEP = 10
+IOS_MJPEG_MIN_MAJOR = 15
+IOS_SCREENSHOT_FALLBACK_FPS = 3
 
 
 def _jpeg_size(data: bytes) -> dict:
@@ -99,14 +102,24 @@ def _release_wda_port() -> None:
     return None
 
 
+def _parse_ios_major(version: str) -> int:
+    try:
+        return int(str(version).strip().split(".", 1)[0])
+    except (TypeError, ValueError):
+        return 0
+
+
 class IOSDriver(AbstractDeviceDriver):
     """基于 WDA 的 iOS 设备驱动。"""
 
-    def __init__(self, device_id: str, adapter: IOSAdapterBase):
+    def __init__(self, device_id: str, adapter: IOSAdapterBase, ios_version: str = ""):
         self.device_id = device_id
         self._adapter = adapter
+        self._ios_version = ios_version
+        self._ios_major = _parse_ios_major(ios_version)
         self._is_mirroring = False
         self._mjpeg_task: asyncio.Task | None = None
+        self._use_screenshot_stream = False
         self._video_subscribers: list[asyncio.Queue] = []
         self._wda_port = 0
         self._mjpeg_port = 0
@@ -137,6 +150,17 @@ class IOSDriver(AbstractDeviceDriver):
                 return f"ios-{self.device_id}"
 
             self._wda_port, self._mjpeg_port = _allocate_wda_ports()
+            await self._resolve_ios_version()
+            if 0 < self._ios_major < IOS_MJPEG_MIN_MAJOR:
+                logger.info(
+                    "[%s] iOS %s uses WDA screenshot polling; skip independent MJPEG relay",
+                    self.device_id,
+                    self._ios_version,
+                )
+                self._mjpeg_port = 0
+                self._use_screenshot_stream = True
+            else:
+                self._use_screenshot_stream = False
             logger.info(
                 "[%s] 分配端口: WDA=%s, MJPEG=%s",
                 self.device_id,
@@ -404,7 +428,7 @@ class IOSDriver(AbstractDeviceDriver):
             )
             return False
 
-    async def get_screenshot(self) -> bytes:
+    async def get_screenshot(self, log_errors: bool = True) -> bytes:
         if not self._adapter.wda_info or not self._http:
             return b""
 
@@ -416,7 +440,8 @@ class IOSDriver(AbstractDeviceDriver):
                 data = await resp.json()
                 return base64.b64decode(data.get("value", ""))
         except Exception as err:
-            logger.error("[%s] 截图失败: %s", self.device_id, err)
+            if log_errors:
+                logger.error("[%s] 截图失败: %s", self.device_id, err)
             return b""
 
     async def install_app(
@@ -495,15 +520,31 @@ class IOSDriver(AbstractDeviceDriver):
             logger.debug("[%s] 截图尺寸解析失败: %s", self.device_id, err)
             return {}
 
+    async def _resolve_ios_version(self) -> None:
+        if self._ios_major:
+            return
+        try:
+            info = await self._adapter.get_device_info()
+            version = str(info.get("version") or info.get("ProductVersion") or "")
+            self._ios_version = version
+            self._ios_major = _parse_ios_major(version)
+        except Exception as err:
+            logger.debug("[%s] iOS version probe failed; keep default MJPEG strategy: %s", self.device_id, err)
+
     async def _read_mjpeg_loop(self) -> None:
         wda_info = self._adapter.wda_info
         if not wda_info:
             logger.error("[%s] WDA 信息不可用，无法启动 MJPEG 流", self.device_id)
             return
 
+        if self._use_screenshot_stream:
+            await self._read_screenshot_loop()
+            return
+
         stream_url = await self._resolve_mjpeg_url(wda_info)
         if not stream_url:
-            logger.error("[%s] 未找到可用的 MJPEG 流端点", self.device_id)
+            logger.warning("[%s] No available MJPEG endpoint; fallback to WDA screenshot polling", self.device_id)
+            await self._read_screenshot_loop()
             return
 
         while self._is_mirroring:
@@ -553,6 +594,44 @@ class IOSDriver(AbstractDeviceDriver):
                     logger.warning("[%s] MJPEG 流中断: %s，2 秒后重连", self.device_id, err)
                     await asyncio.sleep(2)
 
+    async def _read_screenshot_loop(self) -> None:
+        interval = 1 / IOS_SCREENSHOT_FALLBACK_FPS
+        logger.info(
+            "[%s] iOS video uses WDA screenshot fallback (%s fps)",
+            self.device_id,
+            IOS_SCREENSHOT_FALLBACK_FPS,
+        )
+        consecutive_failures = 0
+        while self._is_mirroring:
+            started = time.monotonic()
+            frame = await self.get_screenshot(log_errors=False)
+            if frame:
+                consecutive_failures = 0
+                self._frame_count += 1
+                for queue in list(self._video_subscribers):
+                    try:
+                        queue.put_nowait(frame)
+                    except asyncio.QueueFull:
+                        try:
+                            queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            pass
+                        try:
+                            queue.put_nowait(frame)
+                        except asyncio.QueueFull:
+                            pass
+            else:
+                consecutive_failures += 1
+                if consecutive_failures == 1 or consecutive_failures % 10 == 0:
+                    logger.warning(
+                        "[%s] WDA screenshot fallback has no frame, consecutive failures=%s",
+                        self.device_id,
+                        consecutive_failures,
+                    )
+
+            elapsed = time.monotonic() - started
+            await asyncio.sleep(max(0.1, interval - elapsed))
+
     async def _resolve_mjpeg_url(self, wda_info) -> str | None:
         mjpeg_port = wda_info.mjpeg_port or self._mjpeg_port
         if mjpeg_port:
@@ -572,6 +651,7 @@ class IOSDriver(AbstractDeviceDriver):
             f"{base}/stream.mjpeg",
             f"{base}/stream",
             f"{base}/screenshot/stream",
+            f"{base}/mjpegstream",
         ]
         for url in candidates:
             try:
@@ -597,5 +677,5 @@ class IOSDriver(AbstractDeviceDriver):
             except Exception as err:
                 logger.debug("[%s] MJPEG 端点探测失败: %s -> %s", self.device_id, url, err)
 
-        logger.warning("[%s] 无法探测 MJPEG 端点，使用默认 /stream.mjpeg", self.device_id)
-        return candidates[0]
+        logger.warning("[%s] 无法探测 MJPEG 端点", self.device_id)
+        return None

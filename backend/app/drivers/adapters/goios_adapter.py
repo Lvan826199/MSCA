@@ -104,16 +104,37 @@ class GoIOSAdapter(IOSAdapterBase):
             output_json = await self._run_cmd("list")
             data = json.loads(output_json)
             devices = []
-            for d in data.get("deviceList", []):
-                devices.append({
-                    "udid": d.get("serialNumber", ""),
-                    "name": d.get("properties", {}).get("DeviceName", ""),
-                    "version": d.get("properties", {}).get("ProductVersion", ""),
-                    "model": d.get("properties", {}).get("ProductType", ""),
-                })
+            raw_devices = data.get("deviceList", []) if isinstance(data, dict) else data
+            for d in raw_devices:
+                if isinstance(d, str):
+                    devices.append(await self._get_device_info_by_udid(d))
+                    continue
+                if not isinstance(d, dict):
+                    continue
+                props = d.get("properties", {}) if isinstance(d.get("properties"), dict) else d
+                udid = d.get("serialNumber", "") or d.get("udid", "") or props.get("UniqueDeviceID", "")
+                devices.append(self._device_dict_from_info(udid, props))
             return devices
         except Exception:
             return []
+
+    @staticmethod
+    def _device_dict_from_info(udid: str, info: dict) -> dict:
+        return {
+            "udid": udid or info.get("UniqueDeviceID", ""),
+            "name": info.get("DeviceName", ""),
+            "version": info.get("ProductVersion", "") or info.get("HumanReadableProductVersionString", ""),
+            "model": info.get("ProductType", ""),
+        }
+
+    async def _get_device_info_by_udid(self, udid: str) -> dict:
+        try:
+            output = await self._run_cmd("info", f"--udid={udid}", timeout=10)
+            info = json.loads(output)
+            return self._device_dict_from_info(udid, info if isinstance(info, dict) else {})
+        except Exception as e:
+            logger.debug(f"[{udid}] go-ios info 获取设备信息失败: {e}")
+            return {"udid": udid, "name": "", "version": "", "model": ""}
 
     async def install_wda(self, ipa_path: str) -> bool:
         """通过 go-ios 安装 WDA。"""
@@ -508,11 +529,9 @@ class GoIOSAdapter(IOSAdapterBase):
         try:
             output = await self._run_cmd("info", f"--udid={self.udid}")
             info = json.loads(output)
+            device = self._device_dict_from_info(self.udid, info if isinstance(info, dict) else {})
             return {
-                "udid": self.udid,
-                "name": info.get("DeviceName", ""),
-                "version": info.get("ProductVersion", ""),
-                "model": info.get("ProductType", ""),
+                **device,
                 "serial": info.get("SerialNumber", ""),
             }
         except Exception as e:

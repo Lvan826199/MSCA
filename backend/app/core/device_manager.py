@@ -1,7 +1,9 @@
 import asyncio
+import json
 import logging
 import os
 import shutil
+import subprocess
 
 import adbutils
 
@@ -70,6 +72,7 @@ class DeviceManager:
         self._tidevice_available = False
         self._goios_available = False
         self._goios_bin = ""
+        self._goios_seen_udids: set[str] = set()
         self._ios_failure_counts: dict[str, int] = {}
         self._ios_unavailable: set[str] = set()
         # 缓存已知 ADB 设备的属性（model, version, resolution），避免每次轮询都执行 shell 命令
@@ -119,6 +122,16 @@ class DeviceManager:
         """手动刷新一次设备列表。"""
         await self._scan()
         return self.devices
+
+    async def set_device_alias(self, device_id: str, alias: str) -> DeviceInfo | None:
+        device = self._devices.get(device_id)
+        if not device:
+            return None
+
+        normalized_alias = alias_manager.set_alias(device_id, alias)
+        device.alias = normalized_alias
+        await self._notify()
+        return device
 
     def _detect_ios_support(self):
         """检测 iOS 支持库是否可用（tidevice 和 go-ios 可同时启用）。"""
@@ -175,8 +188,8 @@ class DeviceManager:
         changed = current_ids != old_ids
         if not changed:
             # 状态或别名变化也需要推送（别名热加载依赖此比较）
-            old_state = {device_id: (d.status, d.alias) for device_id, d in self._devices.items()}
-            new_state = {d.id: (d.status, d.alias) for d in current}
+            old_state = {device_id: d.model_dump() for device_id, d in self._devices.items()}
+            new_state = {d.id: d.model_dump() for d in current}
             changed = old_state != new_state
         if not changed:
             return
@@ -262,10 +275,12 @@ class DeviceManager:
                 from ..drivers.adapters.goios_adapter import GoIOSAdapter
                 adapter = GoIOSAdapter(udid="", ios_bin=self._goios_bin)
                 by_udid = {d.id: d for d in devices}
+                current_goios_udids: set[str] = set()
                 for d in await adapter.list_devices():
                     udid = d.get("udid", "")
                     if not udid:
                         continue
+                    current_goios_udids.add(udid)
                     if udid in seen_udids:
                         existing = by_udid.get(udid)
                         if existing and not existing.version and d.get("version", ""):
@@ -282,6 +297,7 @@ class DeviceManager:
                     )
                     devices.append(device)
                     by_udid[udid] = device
+                self._goios_seen_udids = current_goios_udids
             except Exception as e:
                 logger.debug(f"go-ios 设备扫描失败: {e}")
 
@@ -324,11 +340,24 @@ class DeviceManager:
             dev = self._devices.get(udid)
             if dev:
                 version = dev.version
+        if not version:
+            info = self._probe_goios_device_info(udid)
+            version = info.get("version", "")
+            dev = self._devices.get(udid)
+            if dev and version:
+                dev.version = version
+                dev.model = dev.model or info.get("model", "")
 
         major = _parse_ios_major(version)
 
         # iOS ≤15.x 优先 tidevice，≥16.x 优先 go-ios；版本未知时优先 tidevice，避免 iOS 15.x 误走 go-ios。
         if major == 0:
+            if self._goios_available and (
+                udid in self._goios_seen_udids or self._probe_goios_device_seen(udid)
+            ):
+                logger.warning(f"[{udid}] iOS 版本未知，但 go-ios 已发现该设备，优先使用 go-ios")
+                from ..drivers.adapters.goios_adapter import GoIOSAdapter
+                return GoIOSAdapter(udid=udid, ios_bin=self._goios_bin)
             if self._tidevice_available:
                 logger.warning(f"[{udid}] iOS 版本未知，优先使用 tidevice")
                 from ..drivers.adapters.tidevice_adapter import TideviceAdapter
@@ -356,6 +385,59 @@ class DeviceManager:
                 return TideviceAdapter(udid=udid)
 
         raise RuntimeError("iOS 支持未启用（tidevice 和 go-ios 均不可用）")
+
+    def _probe_goios_device_info(self, udid: str) -> dict:
+        if not self._goios_available or not self._goios_bin:
+            return {}
+        try:
+            proc = subprocess.run(
+                [self._goios_bin, "info", f"--udid={udid}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if proc.returncode != 0:
+                return {}
+            info = json.loads(proc.stdout)
+            if not isinstance(info, dict):
+                return {}
+            return {
+                "version": info.get("ProductVersion", "") or info.get("HumanReadableProductVersionString", ""),
+                "model": info.get("ProductType", ""),
+                "name": info.get("DeviceName", ""),
+            }
+        except Exception as err:
+            logger.debug("[%s] go-ios info 同步探测失败: %s", udid, err)
+            return {}
+
+    def _probe_goios_device_seen(self, udid: str) -> bool:
+        if not self._goios_available or not self._goios_bin:
+            return False
+        try:
+            proc = subprocess.run(
+                [self._goios_bin, "list"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if proc.returncode != 0:
+                return False
+            data = json.loads(proc.stdout)
+            raw_devices = data.get("deviceList", []) if isinstance(data, dict) else data
+            for item in raw_devices:
+                if item == udid:
+                    return True
+                if isinstance(item, dict):
+                    props = item.get("properties", {}) if isinstance(item.get("properties"), dict) else item
+                    item_udid = item.get("serialNumber", "") or item.get("udid", "") or props.get("UniqueDeviceID", "")
+                    if item_udid == udid:
+                        return True
+            return False
+        except Exception as err:
+            logger.debug("[%s] go-ios list 同步探测失败: %s", udid, err)
+            return False
 
     async def _notify(self):
         data = [d.model_dump() for d in self._devices.values()]

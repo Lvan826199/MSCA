@@ -6,9 +6,9 @@ let ws = null
 let heartbeatTimer = null
 let reconnectTimer = null
 let reconnectAttempts = 0
-const MAX_RECONNECT_ATTEMPTS = 10
 const HEARTBEAT_INTERVAL = 30000
 const RECONNECT_BASE_DELAY = 1000
+const MAX_RECONNECT_DELAY_EXPONENT = 5
 
 function connect() {
   // OPEN / CONNECTING 状态均短路，避免创建第二个 WebSocket 覆盖模块级 ws
@@ -81,10 +81,12 @@ function stopHeartbeat() {
 }
 
 function scheduleReconnect() {
-  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return
-  // 先清理旧定时器，避免重复调度叠加
+  // 先清理旧定时器，避免重复调度叠加。持续重连，防止后端启动较慢时状态永久停在未连接。
   clearTimeout(reconnectTimer)
-  const delay = RECONNECT_BASE_DELAY * Math.pow(2, Math.min(reconnectAttempts, 5))
+  const delay = RECONNECT_BASE_DELAY * Math.pow(
+    2,
+    Math.min(reconnectAttempts, MAX_RECONNECT_DELAY_EXPONENT)
+  )
   reconnectAttempts++
   reconnectTimer = setTimeout(connect, delay)
 }

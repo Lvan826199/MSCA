@@ -19,18 +19,82 @@ const initialConnection = getConnectionSettings()
 const mode = ref(initialConnection.mode || (isElectron ? "auto" : "local")) // auto | local | remote
 const remoteUrl = ref(normalizeHttpBaseUrl(initialConnection.remoteUrl))
 const backendUrl = ref("")
+const DEFAULT_LOCAL_BACKEND_URL = "http://127.0.0.1:18000"
+const BACKEND_HEALTH_TIMEOUT = 1500
 
 // 模块级初始化 promise，只执行一次
 const ready = initBackendUrl()
+
+function buildLocalBackendUrl(port) {
+  return `http://127.0.0.1:${port}`
+}
+
+function isValidPort(port) {
+  return Number.isInteger(port) && port > 0 && port < 65536
+}
+
+export async function isBackendHealthy(baseUrl, fetchImpl = globalThis.fetch) {
+  if (!baseUrl || typeof fetchImpl !== "function") return false
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), BACKEND_HEALTH_TIMEOUT)
+  try {
+    const response = await fetchImpl(`${baseUrl.replace(/\/+$/, "")}/health`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+    if (!response.ok) return false
+    const data = await response.json().catch(() => null)
+    return data?.status === "ok"
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function resolveElectronBackendUrl(
+  electronAPI,
+  { isDevMode = isDev, fetchImpl = globalThis.fetch } = {}
+) {
+  let status = null
+  try {
+    if (typeof electronAPI?.getBackendStatus === "function") {
+      status = await electronAPI.getBackendStatus()
+    }
+  } catch {
+    status = null
+  }
+
+  let port = Number(status?.port)
+  if (!isValidPort(port)) {
+    try {
+      if (typeof electronAPI?.getBackendPort === "function") {
+        port = Number(await electronAPI.getBackendPort())
+      }
+    } catch {
+      port = 18000
+    }
+  }
+
+  const candidateUrl = isValidPort(port) ? buildLocalBackendUrl(port) : DEFAULT_LOCAL_BACKEND_URL
+  if (status?.running !== false && await isBackendHealthy(candidateUrl, fetchImpl)) {
+    return candidateUrl
+  }
+
+  if (isDevMode && await isBackendHealthy(DEFAULT_LOCAL_BACKEND_URL, fetchImpl)) {
+    return DEFAULT_LOCAL_BACKEND_URL
+  }
+
+  return candidateUrl
+}
 
 async function initBackendUrl() {
   if (isElectron) {
     // Electron 模式：通过 IPC 获取后端实际端口
     try {
-      const port = await window.electronAPI.getBackendPort()
-      backendUrl.value = `http://127.0.0.1:${port}`
+      backendUrl.value = await resolveElectronBackendUrl(window.electronAPI)
     } catch {
-      backendUrl.value = "http://127.0.0.1:18000"
+      backendUrl.value = DEFAULT_LOCAL_BACKEND_URL
     }
   } else if (isDev) {
     // Vite dev 模式：空串 → 相对 URL → Vite proxy 转发

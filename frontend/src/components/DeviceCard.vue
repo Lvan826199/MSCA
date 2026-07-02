@@ -4,6 +4,15 @@
       <div class="device-status">
         <span class="status-dot" :class="statusClass" />
         <span class="device-model" :title="displayName">{{ displayName }}</span>
+        <el-button
+          class="rename-btn"
+          :icon="EditPen"
+          circle
+          text
+          size="small"
+          title="重命名设备"
+          @click.stop="openRenameDialog"
+        />
       </div>
       <div class="platform-badge" :class="platformBadgeClass">
         <span class="platform-name">{{ device.platform === 'android' ? 'Android' : 'iOS' }}</span>
@@ -62,6 +71,41 @@
       />
     </div>
 
+    <!-- 设备重命名弹窗 -->
+    <el-dialog
+      v-model="showRenameDialog"
+      title="重命名设备"
+      width="420px"
+      append-to-body
+      :close-on-click-modal="false"
+    >
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="设备名称">
+          <el-input
+            v-model="aliasDraft"
+            maxlength="64"
+            show-word-limit
+            clearable
+            placeholder="例如：测试机 01"
+            @keyup.enter="saveDeviceAlias"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRenameDialog = false">取消</el-button>
+        <el-button
+          v-if="device.alias"
+          :disabled="renaming"
+          @click="clearDeviceAlias"
+        >
+          恢复默认
+        </el-button>
+        <el-button type="primary" :loading="renaming" @click="saveDeviceAlias">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- AAB 签名配置对话框 -->
     <el-dialog
       v-model="showKeystoreDialog"
@@ -108,8 +152,11 @@
 <script setup>
 import { computed, ref } from "vue"
 import { useRouter } from "vue-router"
+import { EditPen } from "@element-plus/icons-vue"
 import { ElMessage } from "element-plus/es/components/message/index"
+import { buildDeviceAliasApiUrl } from "@/composables/deviceConnectionState.js"
 import { useConnection } from "@/composables/useConnection"
+import { useDevices } from "@/composables/useDevices"
 
 const props = defineProps({
   device: { type: Object, required: true },
@@ -117,9 +164,13 @@ const props = defineProps({
 
 const router = useRouter()
 const { ready: connectionReady, getBackendUrl } = useConnection()
+const { fetchDevices } = useDevices()
 
 const installing = ref(false)
 const fileInput = ref(null)
+const showRenameDialog = ref(false)
+const aliasDraft = ref("")
+const renaming = ref(false)
 
 // AAB 签名相关
 const showKeystoreDialog = ref(false)
@@ -182,6 +233,43 @@ function copyDeviceId() {
   }).catch(() => {
     ElMessage.error("复制失败")
   })
+}
+
+function openRenameDialog() {
+  aliasDraft.value = props.device.alias || ""
+  showRenameDialog.value = true
+}
+
+async function saveDeviceAlias() {
+  await updateDeviceAlias(aliasDraft.value)
+}
+
+async function clearDeviceAlias() {
+  await updateDeviceAlias("")
+}
+
+async function updateDeviceAlias(alias) {
+  renaming.value = true
+  try {
+    await connectionReady
+    const base = getBackendUrl()
+    const res = await fetch(buildDeviceAliasApiUrl(base, props.device.id), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alias }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.detail || "重命名失败")
+    }
+    await fetchDevices()
+    showRenameDialog.value = false
+    ElMessage.success(alias.trim() ? "设备名称已更新" : "已恢复默认名称")
+  } catch (err) {
+    ElMessage.error(err.message || "重命名失败")
+  } finally {
+    renaming.value = false
+  }
 }
 
 const cardPlatformClass = computed(() => ({
@@ -325,6 +413,8 @@ async function doInstall(file, signingOpts = null) {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
 }
 
 .status-dot {
@@ -360,6 +450,18 @@ async function doInstall(file, signingOpts = null) {
   font-size: 15px;
   font-weight: 500;
   color: #e5eaf3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rename-btn {
+  flex: 0 0 auto;
+  color: #909399;
+}
+
+.rename-btn:hover {
+  color: #409eff;
 }
 
 .platform-badge {

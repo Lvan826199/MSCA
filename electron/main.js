@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron")
+const { app, BrowserWindow, ipcMain, Menu } = require("electron")
 const path = require("path")
 const BackendManager = require("./backend-manager")
 
@@ -14,6 +14,55 @@ function getDevServerUrl() {
     getFrontendDevServerConfig,
   } = require("../scripts/dev-server-config.cjs")
   return buildFrontendDevServerUrl(getFrontendDevServerConfig(process.env, path.join(__dirname, "..")))
+}
+
+function getWindowIconPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "resources", "icon.ico")
+  }
+  return path.join(__dirname, "..", "resources", "icon.ico")
+}
+
+function createApplicationMenu() {
+  return Menu.buildFromTemplate([
+    {
+      label: "文件",
+      submenu: [
+        { label: "退出", accelerator: "Alt+F4", role: "quit" },
+      ],
+    },
+    {
+      label: "编辑",
+      submenu: [
+        { label: "撤销", accelerator: "Ctrl+Z", role: "undo" },
+        { label: "重做", accelerator: "Ctrl+Y", role: "redo" },
+        { type: "separator" },
+        { label: "剪切", accelerator: "Ctrl+X", role: "cut" },
+        { label: "复制", accelerator: "Ctrl+C", role: "copy" },
+        { label: "粘贴", accelerator: "Ctrl+V", role: "paste" },
+        { type: "separator" },
+        { label: "全选", accelerator: "Ctrl+A", role: "selectAll" },
+      ],
+    },
+    {
+      label: "视图",
+      submenu: [
+        { label: "刷新", accelerator: "Ctrl+R", role: "reload" },
+        { label: "强制刷新", accelerator: "Ctrl+Shift+R", role: "forceReload" },
+        { type: "separator" },
+        { label: "开发者工具", accelerator: "Ctrl+Shift+I", role: "toggleDevTools" },
+      ],
+    },
+    {
+      label: "窗口",
+      submenu: [
+        { label: "最小化", accelerator: "Ctrl+M", role: "minimize" },
+        { label: "切换全屏", accelerator: "F11", role: "togglefullscreen" },
+        { type: "separator" },
+        { label: "关闭窗口", accelerator: "Ctrl+W", role: "close" },
+      ],
+    },
+  ])
 }
 
 // 单实例锁：双开会导致启动时的残留进程清理误杀另一实例的后端
@@ -36,6 +85,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 600,
     title: "MSCA - 多设备投屏控制",
+    icon: getWindowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -58,6 +108,7 @@ ipcMain.handle("get-backend-status", () => backendManager.getStatus())
 
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return
+  Menu.setApplicationMenu(createApplicationMenu())
   try {
     await backendManager.start()
     console.log(`[main] 后端已启动，端口 ${backendManager.port}`)

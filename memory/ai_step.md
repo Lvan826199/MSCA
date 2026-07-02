@@ -1,5 +1,78 @@
 # AI 操作步骤记录
 
+---
+
+## 2026-07-01 - 修复 iOS 26.2 设备版本识别与适配器误选
+
+### 触发背景
+
+用户反馈设备 `00008110-00112DA90E07801E` 为 iOS 26.2，可以投屏但无法控屏，且设备列表不显示系统版本号。现场日志显示该设备因版本为空被判定为“iOS 版本未知”，从而优先走 `TideviceAdapter`；投屏可短暂启动，但 MJPEG 与控制请求随后出现 WinError 64，说明高版本设备误走 tidevice relay 后控制链路不稳定。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| go-ios 解析兼容 | 兼容 go-ios 1.2.0 `ios list` 只返回 UDID 字符串的格式，必要时补充调用 `ios info --udid=...` 解析 `ProductVersion` / `HumanReadableProductVersionString` | `backend/app/drivers/adapters/goios_adapter.py` |
+| 适配器选择兜底 | 版本为空时先尝试 go-ios 同步探测；若 go-ios 当前已枚举到该 UDID，即使详细版本仍为空，也优先走 `GoIOSAdapter`，避免 iOS 26 被误判到 tidevice | `backend/app/core/device_manager.py` |
+| 前端刷新修复 | 设备列表变更判断纳入完整 `DeviceInfo`，版本/型号后续补齐时也会推送到前端 | `backend/app/core/device_manager.py` |
+| 向下兼容保护 | 补充 iOS 15 继续走 tidevice、iOS 16/18/26 明确版本走 go-ios、未知且 go-ios 不可见时保持 tidevice fallback 的测试 | `backend/tests/test_device_manager_lifecycle.py` |
+| 诊断提示修复 | 保持 go-ios PairRecord/未信任错误为 `device_not_trusted`，避免上层二次诊断降级成 `wda_unknown` | `backend/app/drivers/adapters/base.py`, `backend/tests/test_wda_diagnostics.py` |
+| 单测覆盖 | 增加 go-ios 字符串 UDID 列表补详情、未知版本优先 go-ios 探测/选择的测试 | `backend/tests/test_goios_runwda.py`, `backend/tests/test_device_manager_lifecycle.py` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `cd backend; uv run python -m unittest tests.test_device_manager_lifecycle tests.test_wda_diagnostics tests.test_goios_runwda tests.test_ios_control tests.test_ios_mjpeg_url` | 通过，26 tests pass |
+| `npm.cmd run verify` | 通过，覆盖 `check:agents`、前端 lint、前端 14 项、Electron 7 项、后端 72 项测试与前端 build |
+| iOS 26.2 真实设备 `00008110-00112DA90E07801E` | 用户确认手机 PairingDialog 后，`ios pair` 成功；临时后端 `19000` 实测设备列表显示 `iPhone14,3 / 26.2`，投屏启动成功 `1284x2778`，视频 WebSocket 收到 MJPEG 帧，控制 WebSocket tap 无错误返回 |
+
+### 注意事项
+
+- 当前机器上 `ios list` / `ios info` 均已能识别 `00008110-00112DA90E07801E`，`ProductVersion=26.2`；代码仍保留“go-ios 能 list 到设备但 info 暂时失败”的兼容分支。
+- 若后续更换电脑或重新信任后再次出现 PairRecord，需要在手机上接受 go-ios PairingDialog 后重新运行 `ios pair --udid=00008110-00112DA90E07801E`。
+- 临时后端 `19000` 已停止，`.backend-port` 已恢复为 `18000`，确认无活跃投屏与 8100-8300 段残留监听。
+
+### 最终提交
+- 待提交
+
+---
+
+## 2026-07-02 - Web/桌面端新增设备重命名
+
+### 触发背景
+
+用户反馈当前设备别名主要依赖 `backend/config/device_aliases.json` 配置文件维护，对非技术用户不友好，希望 Web 端和桌面端都能直接对设备重命名。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 后端别名持久化 | 为 `AliasManager` 增加 `set_alias` 与原子写入 JSON 配置能力，空别名表示恢复默认名称 | `backend/app/core/alias_manager.py` |
+| 设备列表推送 | 新增 `DeviceManager.set_device_alias`，保存别名后立即更新内存设备对象并推送 WebSocket 设备列表 | `backend/app/core/device_manager.py` |
+| API 能力 | 新增 `PUT /api/devices/{device_id}/alias` 和 `DELETE /api/devices/{device_id}/alias`，供前端保存或清空设备别名 | `backend/app/api/devices.py` |
+| 前端操作入口 | 在设备卡片标题旁新增编辑图标，弹窗输入设备名称；保存后刷新设备列表，Web 与桌面端共用 | `frontend/src/components/DeviceCard.vue` |
+| 前端 URL 工具 | 新增设备别名接口 URL 构造函数并补充单测 | `frontend/src/composables/deviceConnectionState.js`, `frontend/src/composables/deviceConnectionState.test.js` |
+| 测试覆盖 | 新增别名配置落盘测试与设备别名 API 测试 | `backend/tests/test_alias_manager.py`, `backend/tests/test_devices_api.py` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `cd backend; uv run python -m unittest tests.test_alias_manager tests.test_devices_api` | 通过，4 项测试通过 |
+| `npm.cmd --prefix frontend run test -- src/composables/deviceConnectionState.test.js` | 通过，前端测试通过 |
+| `npm.cmd --prefix frontend run lint:check` | 通过 |
+| `npm.cmd run verify` | 通过，覆盖 `check:agents`、前端 lint、前端 15 项测试、Electron 7 项测试、后端 76 项测试与前端构建 |
+
+### 注意事项
+
+- 新重命名能力仍复用原 `device_aliases.json`，只是把维护入口从手改配置文件升级为 UI 操作。
+- 用户输入空名称或点击“恢复默认”会删除对应设备 ID 的别名映射，后续显示回设备型号或设备 ID。
+
+### 最终提交
+
+- 待提交
+
 > **强制规则**：每次 AI 完成开发任务后，必须将本次操作行为和执行结果写入本文档。本文档作为持久化操作记录，供后续会话参考。
 
 ---
@@ -1478,3 +1551,124 @@ git commit -m "type(scope): subject"
 ### 最终提交
 
 - `2b67aeb` feat(frontend): 桌面端日志改为侧边抽屉
+
+---
+
+## 2026-07-01 - 排查 iOS 13.6.1 / 14.4.2 低版本设备投屏失败
+
+### 触发背景
+
+用户反馈 iOS 13.6.1（`e455517036f9aabe3ceb7111a8eaf1c01d7de3f0`，SH-SJ-0049）和 iOS 14.4.2（`00008030-001E19021A42802E`，SH-SJ-0186）仍然连不上，其他 iOS 15/16/17/18 设备已正常。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 根因定位 | 单独启动两台低版本设备，确认设备发现、WDA 端口转发、session 创建均可短暂成功，但独立 MJPEG 端口 `9100` 转发后所有流端点均被设备端重置，视频 WebSocket 发送 0 帧 | 后端运行日志 |
+| WDA 复核 | 使用前台 `tidevice wdaproxy` 验证 iOS 13.6.1 与 14.4.2 均出现 `xctrunner quited / wda started failed`，说明当前安装的 WDA Runner 在这两台低版本系统上启动后很快退出 | 真实设备诊断 |
+| 代码防护 | iOS 13/14 启动时跳过独立 MJPEG relay，改用 WDA `/screenshot` 轮询 fallback；MJPEG 探测失败不再返回伪造的 `/stream.mjpeg` URL；补充 `/mjpegstream` 候选端点 | `backend/app/drivers/ios.py`, `backend/app/api/mirror.py` |
+| 日志降噪 | 截图 fallback 失败时由轮询循环周期性 warning，避免每 0.3 秒刷一条截图 ERROR | `backend/app/drivers/ios.py` |
+| 单测覆盖 | 补充独立 MJPEG 失败回退 WDA 主端口、iOS 13 禁用 MJPEG relay 的单测 | `backend/tests/test_ios_mjpeg_url.py` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `cd backend; uv run python -m unittest discover -s tests -p "test_ios_*.py"` | 通过，19 项 iOS 后端单测通过 |
+| `npm.cmd run verify` | 通过，覆盖 `check:agents`、lint、前端 14 项单测、Electron 7 项单测、后端 64 项单测与前端构建 |
+| iOS 14.4.2 真实设备 | 新逻辑确认 `MJPEG=0`，WDA session 创建成功、尺寸读取成功；随后 `/screenshot` 出现 WinError 64 / Server disconnected，最终 WDA 主端口拒绝连接 |
+| iOS 13.6.1 真实设备 | 新逻辑确认 `MJPEG=0`，WDA session 创建成功、尺寸读取成功；随后 `/screenshot` 同样断开，最终 WDA 主端口拒绝连接 |
+
+### 注意事项
+
+- 代码层已修复“MJPEG 探测失败仍强行使用默认流地址”的问题，并为 iOS 13/14 增加截图轮询保底；但这两台设备当前仍不能稳定投屏的根因是 WDA Runner 本体在低版本系统上启动后退出。
+- 后续要真正恢复 iOS 13.6.1 / 14.4.2，需要重新构建/签名一版兼容 iOS 13/14 的 WebDriverAgent Runner，或在设备上安装经验证可长期保持 `/status`、`/screenshot` 可访问的 WDA 包。
+- 临时测试后端使用 `19000` 端口，测试结束后已停止，并将 `.backend-port` 恢复为当前桌面后端端口 `18000`。
+
+### 最终提交
+
+- 待提交
+---
+
+## 2026-07-01 - 补充 iOS 环境部署要求:WebDriverAgentRunner 打包策略
+
+### 触发背景
+
+用户确认当前使用 Xcode 15.4 与 Appium WebDriverAgentRunner 9.0.6 打包低版本 WDA,而其他高版本设备使用 Xcode 16 + WDA 9.0.6 正常,要求将低版本 WDA 打包策略归档到相关文档中。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 部署文档 | 在 iOS 设备部署章节新增“iOS 环境部署要求:WebDriverAgentRunner 打包策略”,说明 iOS 13/14 使用低版本兼容 WDA 包、iOS 15+ 使用现代 WDA 包,并补充卸载、安装与 `tidevice wdaproxy` 验证步骤 | `doc/设备部署指南.md` |
+| 技术文档 | 在 iOS 版本适配策略中补充 WDA Runner 打包版本策略,明确通信工具适配与 WDA Runner 运行时兼容是两层策略 | `doc/项目核心技术点.md` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| 文档结构检查 | 已确认新增章节编号与 iOS 17+ 引用同步调整 |
+
+### 最终提交
+
+- 待提交
+
+---
+
+## 2026-07-02 - 桌面端图标与左下角连接状态修复
+
+### 触发背景
+
+用户希望桌面端打包时使用 `E:\Y_pythonProject\MwjZhiWen` 项目下的 logo,并反馈桌面端左下角长期显示“未连接”。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| 打包图标 | 将 `E:\Y_pythonProject\MwjZhiWen\packaging\mwj-logo.ico` 同步为本项目 `resources/icon.ico`; Electron Builder 原配置 `build.win.icon` 已指向该文件 | `resources/icon.ico`, `package.json` |
+| 运行时窗口图标 | 新增 `getWindowIconPath()`,开发态与打包态均显式给 `BrowserWindow` 设置窗口图标 | `electron/main.js` |
+| 连接状态修复 | 左下角状态来自 `/ws/echo` 健康 WebSocket,不是具体设备状态;移除最多重连 10 次后停止的限制,改为持续重连且指数退避封顶,避免后端启动较慢或恢复后状态永久停留“未连接” | `frontend/src/composables/useWebSocket.js`, `frontend/src/App.vue` |
+| 桌面端端口复用 | Electron 启动前先探测已有健康后端,若 `18000` 已有健康服务则直接复用并回写 `.backend-port`,避免另起 `18001` 后前端拿到失效端口 | `electron/backend-manager.js` |
+| Vite 端口防漂移 | Vite 读取 `.backend-port` 前先校验默认 `18000/health`,默认端口健康时优先使用 `18000`,避免旧端口文件影响 Web/桌面开发代理 | `frontend/vite.config.js` |
+| 前端端口兜底 | Electron IPC 返回的端口不可用时,开发态优先回退到健康的 `18000` | `frontend/src/composables/useConnection.js`, `frontend/src/composables/useConnection.test.js` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| 图标校验 | `resources/icon.ico` 与 `MwjZhiWen\packaging\mwj-logo.ico` SHA256 一致 |
+| `/ws/echo` 运行态校验 | 后端日志已出现 `WebSocket /ws/echo [accepted]`,左下角健康连接可恢复为“已连接” |
+| `npm.cmd run verify` | 通过,覆盖 `check:agents`、前端 lint、前端 17 项单测、Electron 7 项单测、后端 76 项单测与前端构建;Vite proxy 目标端口确认为 `18000` |
+
+### 最终提交
+
+- 待提交
+
+---
+
+## 2026-07-02 - Web 日志抽屉统一与桌面端中文菜单
+
+### 触发背景
+
+用户反馈 Web 端日志页面也希望改成桌面端同款侧边抽屉,并指出桌面端顶部默认英文菜单 File/Edit/Window 实用性弱,希望去除无用项并改成中文。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| Web 日志入口 | 运行日志菜单不再区分 Web/Electron,统一点击后在当前页面右侧打开/关闭日志抽屉;切换到其他菜单时自动关闭抽屉 | `frontend/src/App.vue` |
+| 日志路由兼容 | 保留 `#/logs` 旧入口兼容性,直接访问时自动打开日志抽屉并回到首页工作台 | `frontend/src/App.vue`, `frontend/src/router/index.js` |
+| 桌面中文菜单 | 用中文菜单替换 Electron 默认英文菜单,仅保留文件退出、编辑快捷键、刷新/开发者工具、窗口控制等常用项 | `electron/main.js` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| `npm.cmd --prefix frontend run lint:check` | 通过 |
+| `npm.cmd --prefix frontend run test` | 通过,前端 17 项单测通过 |
+| `npm.cmd run test:electron` | 通过,Electron 7 项单测通过 |
+| `npm.cmd run verify` | 通过,覆盖 `check:agents`、前端 lint、前端/Electron/后端单测与前端构建 |
+
+### 最终提交
+
+- 待提交

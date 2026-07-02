@@ -5,3 +5,7 @@ export function shouldOpenDeviceSocket(socket) {
 export function buildDevicesApiUrl(baseUrl) {
   return `${baseUrl || ""}/api/devices`
 }
+
+export function buildDeviceAliasApiUrl(baseUrl, deviceId) {
+  return `${baseUrl || ""}/api/devices/${encodeURIComponent(deviceId)}/alias`
+}
