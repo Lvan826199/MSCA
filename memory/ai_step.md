@@ -71,7 +71,7 @@
 
 ### 最终提交
 
-- 待提交
+- `a6b79b0e6aa02816f2e5475c92205c6f72fb3153` (`fix(ios): stabilize legacy WDA control`)
 
 ---
 
