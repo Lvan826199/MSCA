@@ -17,7 +17,18 @@ logger = logging.getLogger(__name__)
 IOS_WDA_BASE_PORT = 8100
 IOS_WDA_PORT_STEP = 10
 IOS_MJPEG_MIN_MAJOR = 15
-IOS_SCREENSHOT_FALLBACK_FPS = 3
+IOS_SCREENSHOT_FALLBACK_FPS = 2
+IOS_SCREENSHOT_CONTROL_PAUSE_SECONDS = 0.45
+IOS_LEGACY_SCROLL_MIN_INTERVAL_SECONDS = 0.35
+IOS_SESSION_RECREATE_ATTEMPTS = 2
+IOS_SESSION_RECREATE_RETRY_DELAY_SECONDS = 0.3
+
+
+def _is_invalid_session_response(status: int, text: str) -> bool:
+    if status not in {404, 500}:
+        return False
+    lower_text = text.lower()
+    return "invalid session id" in lower_text or "session does not exist" in lower_text
 
 
 def _jpeg_size(data: bytes) -> dict:
@@ -132,6 +143,9 @@ class IOSDriver(AbstractDeviceDriver):
         self._window_height = 0
         self._http: aiohttp.ClientSession | None = None
         self._frame_count = 0
+        self._control_in_flight = 0
+        self._last_control_at = 0.0
+        self._wda_request_lock = asyncio.Lock()
         # 投屏生命周期锁：防止并发 start/stop 重复分配端口、泄漏资源
         self._lifecycle_lock = asyncio.Lock()
 
@@ -142,6 +156,10 @@ class IOSDriver(AbstractDeviceDriver):
     @property
     def screen_size(self) -> tuple[int, int]:
         return self._screen_width, self._screen_height
+
+    @property
+    def uses_screenshot_stream(self) -> bool:
+        return self._use_screenshot_stream
 
     async def start_mirroring(self, options: MirrorOptions) -> str:
         del options
@@ -287,20 +305,138 @@ class IOSDriver(AbstractDeviceDriver):
             return False
 
         kwargs = {"json": payload} if payload is not None else {}
-        async with self._http.post(url, **kwargs) as resp:
-            text = await resp.text()
-            if 200 <= resp.status < 300:
-                logger.debug("[%s] WDA 控制成功: %s", self.device_id, url)
+        current_url = url
+        retry_invalid_session = True
+        post_kwargs = dict(kwargs)
+        post_kwargs["timeout"] = aiohttp.ClientTimeout(total=8, sock_connect=3)
+        self._control_in_flight += 1
+        try:
+            async with self._wda_request_lock:
+                while True:
+                    try:
+                        async with self._http.post(current_url, **post_kwargs) as resp:
+                            text = await resp.text()
+                            if 200 <= resp.status < 300:
+                                logger.debug("[%s] WDA 控制成功: %s", self.device_id, current_url)
+                                return True
+
+                            old_session_id = self._session_id
+                            if (
+                                retry_invalid_session
+                                and old_session_id
+                                and f"/session/{old_session_id}/" in current_url
+                                and _is_invalid_session_response(resp.status, text)
+                                and await self._recreate_session()
+                            ):
+                                current_url = current_url.replace(
+                                    f"/session/{old_session_id}/",
+                                    f"/session/{self._session_id}/",
+                                    1,
+                                )
+                                retry_invalid_session = False
+                                logger.info(
+                                    "[%s] WDA session 已重建，重试控制请求",
+                                    self.device_id,
+                                )
+                                continue
+
+                            logger.warning(
+                                "[%s] WDA 控制失败: HTTP %s %s，响应: %s，提示: %s",
+                                self.device_id,
+                                resp.status,
+                                current_url,
+                                text[:500],
+                                self.diagnose_control_failure(f"HTTP {resp.status}: {text[:500]}"),
+                            )
+                            return False
+                    except (aiohttp.ClientError, TimeoutError) as err:
+                        old_session_id = self._session_id
+                        if (
+                            retry_invalid_session
+                            and old_session_id
+                            and f"/session/{old_session_id}/" in current_url
+                            and await self._recreate_session()
+                        ):
+                            current_url = current_url.replace(
+                                f"/session/{old_session_id}/",
+                                f"/session/{self._session_id}/",
+                                1,
+                            )
+                            retry_invalid_session = False
+                            logger.info(
+                                "[%s] WDA 控制请求异常后 session 已重建，重试一次: %s",
+                                self.device_id,
+                                err,
+                            )
+                            continue
+                        logger.warning(
+                            "[%s] WDA 控制请求异常: %s，提示: %s",
+                            self.device_id,
+                            err,
+                            self.diagnose_control_failure(err),
+                        )
+                        return False
+        finally:
+            self._control_in_flight = max(0, self._control_in_flight - 1)
+            self._last_control_at = time.monotonic()
+
+    async def _recreate_session(
+        self,
+        attempts: int = IOS_SESSION_RECREATE_ATTEMPTS,
+        retry_delay: float = IOS_SESSION_RECREATE_RETRY_DELAY_SECONDS,
+    ) -> bool:
+        attempts = max(1, attempts)
+        for attempt in range(1, attempts + 1):
+            try:
+                self._session_id = await self._create_session()
+                logger.info("[%s] WDA session 重建成功: %s...", self.device_id, self._session_id[:16])
                 return True
-            logger.warning(
-                "[%s] WDA 控制失败: HTTP %s %s，响应: %s，提示: %s",
-                self.device_id,
-                resp.status,
-                url,
-                text[:500],
-                self.diagnose_control_failure(f"HTTP {resp.status}: {text[:500]}"),
-            )
+            except Exception as err:
+                self._session_id = ""
+                if attempt >= attempts:
+                    logger.warning("[%s] WDA session 重建失败: %s", self.device_id, err)
+                    return False
+                logger.info(
+                    "[%s] WDA session 重建失败，%.1fs 后重试: %s",
+                    self.device_id,
+                    retry_delay,
+                    err,
+                )
+                await asyncio.sleep(retry_delay)
+        return False
+
+    async def _ensure_session(self) -> bool:
+        if self._session_id:
+            return True
+        if not self._http or not self._adapter.wda_info:
             return False
+        async with self._wda_request_lock:
+            if self._session_id:
+                return True
+            return await self._recreate_session()
+
+    async def _session_path_or_none(self, action: str) -> str:
+        if await self._ensure_session():
+            return f"/session/{self._session_id}"
+        logger.warning("[%s] WDA session 不可用，跳过 iOS %s 控制请求", self.device_id, action)
+        return ""
+
+    def _should_pause_screenshot_for_control(self) -> bool:
+        if self._control_in_flight > 0:
+            return True
+        if not self._last_control_at:
+            return False
+        return time.monotonic() - self._last_control_at < IOS_SCREENSHOT_CONTROL_PAUSE_SECONDS
+
+    def should_drop_legacy_scroll(self) -> bool:
+        """低版本截图回退模式下丢弃过密滚动，避免 WDA 控制请求排队造成滞后。"""
+        if not self._use_screenshot_stream:
+            return False
+        if self._control_in_flight > 0:
+            return True
+        if not self._last_control_at:
+            return False
+        return time.monotonic() - self._last_control_at < IOS_LEGACY_SCROLL_MIN_INTERVAL_SECONDS
 
     def _to_window_points(
         self, x: float, y: float, frame_width: int = 0, frame_height: int = 0
@@ -314,6 +450,10 @@ class IOSDriver(AbstractDeviceDriver):
         src_h = frame_height or self._screen_height
         win_w, win_h = self._window_width, self._window_height
         if win_w > 0 and win_h > 0 and src_w > 0 and src_h > 0:
+            # 进入横屏游戏后，WDA window/size 有时仍保留启动时的竖屏值；
+            # 画面帧尺寸会先变成横屏，此时交换窗口宽高可保持坐标系方向一致。
+            if (src_w > src_h and win_w < win_h) or (src_w < src_h and win_w > win_h):
+                win_w, win_h = win_h, win_w
             if src_w != win_w or src_h != win_h:
                 x = x * win_w / src_w
                 y = y * win_h / src_h
@@ -327,12 +467,12 @@ class IOSDriver(AbstractDeviceDriver):
             return False
 
         base = f"http://{self._adapter.wda_info.host}:{self._adapter.wda_info.port}"
-        session_path = f"/session/{self._session_id}" if self._session_id else ""
-        if not session_path:
-            logger.warning("[%s] WDA session 不可用，iOS 控制可能失败", self.device_id)
 
         try:
             if event.action == "tap":
+                session_path = await self._session_path_or_none("tap")
+                if not session_path:
+                    return False
                 x, y = self._to_window_points(
                     event.params.get("x", 0),
                     event.params.get("y", 0),
@@ -360,6 +500,9 @@ class IOSDriver(AbstractDeviceDriver):
                 logger.warning("[%s] iOS touch down/move/up 已废弃，应由上层聚合为 tap 或 swipe", self.device_id)
                 return False
             elif event.action == "swipe":
+                session_path = await self._session_path_or_none("swipe")
+                if not session_path:
+                    return False
                 frame_w = int(event.params.get("width", 0))
                 frame_h = int(event.params.get("height", 0))
                 from_x, from_y = self._to_window_points(
@@ -397,11 +540,17 @@ class IOSDriver(AbstractDeviceDriver):
                 elif key == "lock":
                     return await self._post_wda(f"{base}/wda/lock")
                 elif key == "volumeUp":
+                    session_path = await self._session_path_or_none("volumeUp")
+                    if not session_path:
+                        return False
                     return await self._post_wda(
                         f"{base}{session_path}/wda/pressButton",
                         {"name": "volumeUp"},
                     )
                 elif key == "volumeDown":
+                    session_path = await self._session_path_or_none("volumeDown")
+                    if not session_path:
+                        return False
                     return await self._post_wda(
                         f"{base}{session_path}/wda/pressButton",
                         {"name": "volumeDown"},
@@ -411,6 +560,9 @@ class IOSDriver(AbstractDeviceDriver):
             elif event.action == "text":
                 text = event.params.get("text", "")
                 if text:
+                    session_path = await self._session_path_or_none("text")
+                    if not session_path:
+                        return False
                     return await self._post_wda(
                         f"{base}{session_path}/wda/keys",
                         {"value": list(text)},
@@ -434,11 +586,15 @@ class IOSDriver(AbstractDeviceDriver):
 
         base = f"http://{self._adapter.wda_info.host}:{self._adapter.wda_info.port}"
         try:
-            async with self._http.get(f"{base}/screenshot") as resp:
-                if resp.status != 200:
-                    return b""
-                data = await resp.json()
-                return base64.b64decode(data.get("value", ""))
+            async with self._wda_request_lock:
+                async with self._http.get(
+                    f"{base}/screenshot",
+                    timeout=aiohttp.ClientTimeout(total=3, sock_connect=2),
+                ) as resp:
+                    if resp.status != 200:
+                        return b""
+                    data = await resp.json()
+                    return base64.b64decode(data.get("value", ""))
         except Exception as err:
             if log_errors:
                 logger.error("[%s] 截图失败: %s", self.device_id, err)
@@ -603,6 +759,9 @@ class IOSDriver(AbstractDeviceDriver):
         )
         consecutive_failures = 0
         while self._is_mirroring:
+            if self._should_pause_screenshot_for_control():
+                await asyncio.sleep(0.1)
+                continue
             started = time.monotonic()
             frame = await self.get_screenshot(log_errors=False)
             if frame:

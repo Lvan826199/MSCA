@@ -73,6 +73,45 @@
 
 - 待提交
 
+---
+
+## 2026-07-02 - iOS 13/14 WDA 截图回退控屏稳定性修复
+
+### 触发背景
+
+用户反馈 iOS 13.6.1 设备在项目内连接不稳定,而手动执行 `tidevice xctest -B com.gamehausQaTest.WebDriverAgentRunner.xctrunner -e USB_PORT:8119` 可以正常启动 WDA;同时 iOS 14.x 设备可以投屏但控屏偏卡。目标是在不影响 iOS 15+、iOS 18/26 等已可用设备的前提下,提升低版本 WDA 截图回退模式下的控制稳定性。
+
+### 操作摘要
+
+| 类别 | 操作 | 涉及文件 |
+|:---|:---|:---|
+| WDA 控制稳定性 | 为 WDA 控制请求增加超时、串行化与 invalid session 自动重建后重试一次,避免低版本设备 session 短暂失效后直接控屏失败 | `backend/app/drivers/ios.py` |
+| 截图回退降载 | 将 iOS 截图回退帧率从 3 FPS 降到 2 FPS,并在控制请求进行中及结束后短暂停止截图轮询,减少截图接口与点击/滑动控制抢占同一 WDA HTTP 通道 | `backend/app/drivers/ios.py` |
+| 低版本滚动降卡顿 | 仅对 iOS 13/14 截图回退模式增加滚动最小间隔保护,丢弃过密滚动指令,并将低版本滚动 swipe 时长缩短到 0.18s,避免 WDA 队列堆积导致操作滞后 | `backend/app/drivers/ios.py`, `backend/app/websocket/control.py` |
+| iOS 14 偶现触控失败修复 | 修复 WDA `Server disconnected` 后 session 被清空时继续请求根路径 `/actions` 的问题;缺 session 时先重建 session,重建失败则跳过本次控制请求,避免持续返回 `Unhandled endpoint: /actions` | `backend/app/drivers/ios.py` |
+| 横屏游戏点击修复 | 修复进入横屏游戏后,前端帧尺寸已横屏但 WDA 启动时缓存窗口仍为竖屏时的坐标换算错误;帧方向与窗口方向不一致时自动交换窗口宽高,保证点击按横屏点坐标落点 | `backend/app/drivers/ios.py` |
+| 单元测试 | 补充 invalid session 识别、session 重建重试、缺失 session 先恢复、缺失 session 不请求根路径 `/actions`、横屏帧坐标换算、控制期间暂停截图、低版本滚动降载等测试覆盖 | `backend/tests/test_ios_control.py` |
+| 桌面开发体验 | 开发态不再默认自动打开 DevTools;窗口 ready 后主动 show/focus,减少桌面端启动时的 DevTools 噪声并提升窗口可见性 | `electron/main.js` |
+
+### 验证结果
+
+| 验证项 | 结果 |
+|:---|:---|
+| iOS 后端单测子集 | 通过,覆盖 `tests.test_ios_control`、MJPEG URL、图片尺寸、go-ios runwda 与 WDA 诊断相关测试 |
+| `npm.cmd run test:backend` | 通过,后端 85 项单测通过 |
+| `npm.cmd run verify` | 通过,覆盖 `check:agents`、前端 lint、前端 17 项单测、Electron 7 项单测、后端 85 项单测与前端构建 |
+| 后端健康检查 | `GET http://127.0.0.1:18000/health` 返回 `{"status":"ok"}` |
+| 设备发现检查 | `GET /api/devices` 可识别 iOS 13.6.1 设备 `e455517036f9aabe3ceb7111a8eaf1c01d7de3f0`,别名 `SH-SJ-0049`;同时可识别 iOS 14.4.2、15.1、16.7.8、17.7.4、18.3、26.2 等设备 |
+| 真机冒烟 | iOS 13.6.1 冷启动后可收到投屏帧并发送 tap 控制无异常;iOS 14.4.2 可投屏并发送 tap 控制无异常 |
+
+### 说明
+
+暂未把 `tidevice xctest` 作为新的启动兜底写入代码,因为用户提供的手动命令已证明 WDA 包和签名正常,而当前项目内 `wdaproxy/relay + session 恢复 + WDA 请求串行化` 路径已通过冷启动与控屏冒烟。后续若再出现 wdaproxy 启动失败,可将 `tidevice xctest -e USB_PORT:<port>` 设计为低版本 iOS 的显式兜底策略。
+
+### 最终提交
+
+- 待提交
+
 > **强制规则**：每次 AI 完成开发任务后，必须将本次操作行为和执行结果写入本文档。本文档作为持久化操作记录，供后续会话参考。
 
 ---

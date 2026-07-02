@@ -86,6 +86,7 @@ function createWindow() {
     minHeight: 600,
     title: "MSCA - 多设备投屏控制",
     icon: getWindowIconPath(),
+    show: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -93,9 +94,16 @@ function createWindow() {
     },
   })
 
+  win.once("ready-to-show", () => {
+    win.show()
+    win.focus()
+  })
+
   if (isDev) {
     win.loadURL(getDevServerUrl())
-    win.webContents.openDevTools()
+    if (process.env.MSCA_OPEN_DEVTOOLS === "1") {
+      win.webContents.openDevTools()
+    }
   } else {
     win.loadFile(path.join(__dirname, "../frontend/dist/index.html"))
   }

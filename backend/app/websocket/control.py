@@ -195,6 +195,7 @@ def _encode_command(cmd_type: str, data: dict, manager) -> bytes | None:
 
 IOS_TOUCH_MOVE_THRESHOLD = 3
 IOS_TOUCH_DEFAULT_DURATION = 0.3
+IOS_LEGACY_SCROLL_DURATION = 0.18
 
 
 async def _send_ios_event(driver: IOSDriver, event: ControlEvent, websocket, message: str) -> bool:
@@ -345,18 +346,22 @@ async def _handle_ios_command(driver: IOSDriver, cmd_type: str, data: dict, webs
             )
 
         elif cmd_type == "scroll":
+            if driver.should_drop_legacy_scroll():
+                logger.debug("[%s] 丢弃过密 iOS 低版本滚动指令，避免 WDA 队列滞后", driver.device_id)
+                return
             # iOS 滑动模拟
             x = int(data.get("x", 0))
             y = int(data.get("y", 0))
             v_scroll = int(data.get("vScroll", 0))
             dy = max(-800, min(800, -v_scroll * 4))
             frame = _frame_size_params(int(data.get("width", 0)), int(data.get("height", 0)))
+            duration = IOS_LEGACY_SCROLL_DURATION if driver.uses_screenshot_stream else 0.3
             await _send_ios_event(
                 driver,
                 ControlEvent("swipe", {
                     "fromX": x, "fromY": y,
                     "toX": x, "toY": y + dy,
-                    "duration": 0.3,
+                    "duration": duration,
                     **frame,
                 }),
                 websocket,
